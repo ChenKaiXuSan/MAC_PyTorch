@@ -7,7 +7,7 @@ hydra:
 
 # Path
 paths:
-  log_path: logs/unity_sam3d-body/${infer.type}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  log_path: logs/sam3d-body/${infer.type}/${now:%Y-%m-%d}/${now:%H-%M-%S}
   video_path: /mnt/code-luoxi-pegasus/MAC_ACM_MM/data/video
   output_path: /mnt/code-luoxi-pegasus/MAC_ACM_MM/data/sam3d_body
 
