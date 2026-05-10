@@ -8,14 +8,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .SAM3Dbody.sam_3d_body.data.utils.prepare_batch import prepare_batch
-from .SAM3Dbody.sam_3d_body.models.decoders.prompt_encoder import PositionEmbeddingRandom
-from .SAM3Dbody.sam_3d_body.models.modules.mhr_utils import (
+from SAM3Dbody.sam_3d_body.data.utils.prepare_batch import prepare_batch
+from SAM3Dbody.sam_3d_body.models.decoders.prompt_encoder import PositionEmbeddingRandom
+from SAM3Dbody.sam_3d_body.models.modules.mhr_utils import (
     fix_wrist_euler,
     rotation_angle_difference,
 )
-from .SAM3Dbody.sam_3d_body.utils import recursive_to
-from .SAM3Dbody.sam_3d_body.utils.logging import get_pylogger
+from SAM3Dbody.sam_3d_body.utils import recursive_to
+from SAM3Dbody.sam_3d_body.utils.logging import get_pylogger
 
 from ..backbones import create_backbone
 from ..decoders import build_decoder, build_keypoint_sampler, PromptEncoder

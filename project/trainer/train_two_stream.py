@@ -29,8 +29,7 @@ import torch.nn.functional as F
 from torchvision.io import write_video
 from torchvision.utils import save_image, flow_to_image
 
-from project.models.make_model import MakeOriginalTwoStream
-from project.models.optical_flow import Optical_flow
+from MAC_PyTorch.project.models.make_model import MakeOriginalTwoStream
 
 from pytorch_lightning import LightningModule
 

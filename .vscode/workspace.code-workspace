@@ -1,8 +1,12 @@
 {
 	"folders": [
 		{
-			"name": "skeleton",
-			"path": "/workspace/project"
+			"name": "code",
+			"path": "/mnt/code-luoxi-pegasus/MAC_ACM_MM/MAC_PyTorch"
 		},
+		{
+			"name": "data",
+			"path": "/mnt/code-luoxi-pegasus/MAC_ACM_MM/data"
+		}
 	]
 }

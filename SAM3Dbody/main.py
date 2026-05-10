@@ -206,3 +206,6 @@ def main(cfg: DictConfig) -> None:
 if __name__ == "__main__":
     os.environ["HYDRA_FULL_ERROR"] = "1"
     main()
+
+# command 
+# python -m SAM3Dbody.main

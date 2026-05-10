@@ -10,7 +10,7 @@ from setuptools import setup, find_packages
 
 PATH_ROOT = os.path.dirname(__file__)
 
-import project  # noqa: E402
+import MAC_PyTorch.project as project  # noqa: E402
 
 
 def load_requirements(path_dir=PATH_ROOT, comment_char='#'):

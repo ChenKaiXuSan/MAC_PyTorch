@@ -19,39 +19,6 @@ HISTORY:
 Date      	By	Comments
 ----------	---	---------------------------------------------------------
 '''
-"""
-File: main.py
-Project: project
-Created Date: 2023-10-19 02:29:35
-Author: chenkaixu
------
-Comment:
- 
-Have a good code time!
------
-Last Modified: Thursday October 19th 2023 2:29:35 am
-Modified By: the developer formerly known as Kaixu Chen at <chenkaixusan@gmail.com>
------
-HISTORY:
-Date 	By 	Comments
-------------------------------------------------
-
-26-11-2024	Kaixu Chen	refactor the code, now run script in python -m project.main
-
-26-11-2024	Kaixu Chen	add attention branch network (ATN) for compare experiment.
-
-23-09-2024	Kaixu Chen	add compare experiment, phasemix with different backbone, like 3dcnn, 2dcnn, cnn_lstm.
-
-25-06-2024	Kaixu Chen	Splitting the backbone and temporal mix was used for more detailed comparison tests
-
-07-06-2024	Kaixu Chen	add two stream compare experiment.
-
-14-05-2024	Kaixu Chen	1. move the train process inside the new folder "trainer" and select based on "experiment" keyword.
-                        2. add the save helper to save the inference results. deplucate the save_inference code in the main.py.
-04-04-2024	Kaixu Chen	add save inference method. now it can save the pred/label to the disk, for the further analysis.
-2023-10-29	KX.C	add the lr monitor, and fast dev run to trainer.
-
-"""
 
 import os
 import logging
@@ -68,22 +35,13 @@ from pytorch_lightning.callbacks import (
     LearningRateMonitor,
 )
 
-from project.dataloader.data_loader import WalkDataModule
+from MAC_PyTorch.project.dataloader.data_loader import DataModule
 
 #####################################
 # select different experiment trainer 
 #####################################
 
-# 3D CNN model
-from project.trainer.train_single import SingleModule
-from project.trainer.train_late_fusion import LateFusionModule
-from project.trainer.train_temporal_mix import TemporalMixModule
-# compare experiment
-from project.trainer.train_two_stream import TwoStreamModule
-from project.trainer.train_cnn_lstm import CNNLstmModule
-from project.trainer.train_cnn import CNNModule
-# Attention Branch Network
-from project.trainer.train_backbone_atn import BackboneATNModule
+from MAC_PyTorch.project.trainer.train_two_stream import TwoStreamModule
 
 
 from project.cross_validation import DefineCrossValidation

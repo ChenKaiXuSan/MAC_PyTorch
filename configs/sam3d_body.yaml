@@ -13,7 +13,7 @@ paths:
 
 # Model
 model:
-  root_path: /mnt/code-luoxi-pegasus/MAC_ACM_MM/code/ckpt/sam-3d-body-dinov3
+  root_path: /mnt/code-luoxi-pegasus/MAC_ACM_MM/MAC_PyTorch/ckpt/sam-3d-body-dinov3
   checkpoint_path: ${model.root_path}/model.ckpt
   mhr_path: ${model.root_path}/assets/mhr_model.pt
 

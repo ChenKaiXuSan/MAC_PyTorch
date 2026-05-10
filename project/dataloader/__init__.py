@@ -20,5 +20,5 @@ Date 	By 	Comments
 
 '''
 
-from project.dataloader.data_loader import *
-from project.dataloader.gait_video_dataset import *
+from MAC_PyTorch.project.dataloader.data_loader import *
+from MAC_PyTorch.project.dataloader.gait_video_dataset import *

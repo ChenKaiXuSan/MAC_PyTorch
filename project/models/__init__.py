@@ -19,5 +19,4 @@ Date 	By 	Comments
 
 '''
 
-from project.models.make_model import *
-from project.models.optical_flow import *
+from MAC_PyTorch.project.models.make_model import *
