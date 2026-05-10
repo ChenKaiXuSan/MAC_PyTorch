@@ -1,0 +1,49 @@
+# 1. 环境名称
+name: my_project_env
+
+# 2. 软件源：决定了下载速度和包的丰富程度
+channels:
+  - pytorch          # 专门存放 PyTorch 相关包
+  - nvidia           # 专门存放 CUDA 工具包
+  - conda-forge      # 社区维护的最全镜像源（推荐优先使用）
+  - defaults         # 官方默认源
+
+# 3. 依赖包列表
+dependencies:
+  # --- 核心解释器 ---
+  - python=3.11
+  - pip
+  
+  # --- 科学计算与数据处理 ---
+  - numpy
+  - pandas
+  - scikit-learn
+  - matplotlib
+  - tqdm             # 进度条工具
+  
+  # --- 深度学习核心 (GPU 版本) ---
+  - pytorch
+  - torchvision
+  - torchaudio
+  - pytorch-cuda=12.1  # 根据你的显卡驱动调整 (11.8 或 12.1)
+  - pytorch-lightning
+  
+  # --- 项目特定配置 (Hydra/YOLO等) ---
+  - hydra-core
+  - ultralytics
+  
+  # --- 使用 Pip 安装的包 (Conda 找不到或需要从 GitHub 下载的) ---
+  - pip:
+    - requests
+    - opencv-python
+    # 从 GitHub 源码安装的示例
+    # - git+https://github.com/facebookresearch/sam-3d-body.git
+    # 也可以在这里关联你的本地 requirements 文件
+    # - -r requirements.txt
+
+
+# 创建环境：
+# conda env create -f environment.yml
+
+# 激活环境：
+# conda activate my_project_env
