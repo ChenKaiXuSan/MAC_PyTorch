@@ -186,7 +186,7 @@ def main(cfg: DictConfig) -> None:
         return
 
     # Run train/val/test sequentially
-    dataset_types = ["train", "val", "test"]
+    dataset_types = list(cfg.infer.data_types)
 
     for dataset_type in dataset_types:
         logger.info("Start dataset: %s", dataset_type)
