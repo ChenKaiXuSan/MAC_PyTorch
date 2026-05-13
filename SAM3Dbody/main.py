@@ -112,10 +112,12 @@ def dataset_worker(
     if not video_dirs:
         logger.warning("[%s] No video dirs found", dataset_type)
         return
+    video_dirs = sorted(video_dirs)
 
     logger.info("[%s] Processing %d video dirs", dataset_type, len(video_dirs))
-
-    for one_video_dir in video_dirs:
+    
+    # 从后往前处理，优先处理最新的视频
+    for one_video_dir in video_dirs[::-1]:
         try:
             process_single_video(
                 one_video_dir,
