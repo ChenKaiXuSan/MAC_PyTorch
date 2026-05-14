@@ -102,10 +102,19 @@ def dataset_worker(
 
     logger.info("[%s] Started processing", dataset_type)
     
-    # TODO：这里从mapping文件里面获取视频列表， 目前先直接glob所有视频文件
-    # dataset_mapping_path = source_root / f"part_00.txt"
-    # dataset_source_root + dataset_mapping_path
-    video_dirs: list = list(dataset_source_root.glob("**/*.mp4"))  # Adjust the pattern as needed
+
+    video_dirs = []
+    
+    _idx_path = cfg_dict['paths']['video_split_path'] 
+    with open(_idx_path, "r") as f:
+        video_name_list = [line.strip() for line in f if line.strip()]
+    logger.info("[%s] Found %d video names in split file: %s", dataset_type, len(video_name_list), _idx_path)
+
+    for name in video_name_list:
+        video_path = dataset_source_root / name
+        if video_path.suffix == ".mp4":
+            video_dirs.append(video_path)
+
     if not video_dirs:
         logger.warning("[%s] No video dirs found", dataset_type)
         return
@@ -125,34 +134,7 @@ def dataset_worker(
 
 
     num_workers = min(workers_per_gpu, len(video_dirs))
-    if num_workers <= 1:
-        cfg.infer.gpu = gpu_ids
-        logger.info(
-            "[%s] Single worker mode. gpu=%s, workers_per_gpu=%d",
-            dataset_type,
-            cfg.infer.gpu,
-            workers_per_gpu,
-        )
-        for one_video_dir in video_dirs:
-            try:
-                process_single_video(
-                    one_video_dir,
-                    dataset_source_root,
-                    dataset_vis_root,
-                    dataset_infer_root,
-                    action_log_root,
-                    cfg,
-                )
-            except Exception as exc:
-                logger.error(
-                    "[%s] Failed on action %s: %s",
-                    dataset_type,
-                    one_video_dir.name,
-                    exc,
-                )
-        logger.info("[%s] Finished processing", dataset_type)
-        return
-
+    
     # Round-robin split keeps workload balanced while preserving newest-first scheduling.
     video_chunks: List[List[Path]] = [[] for _ in range(num_workers)]
     for idx, one_video_dir in enumerate(video_dirs):

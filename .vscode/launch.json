@@ -5,9 +5,12 @@
       "type": "debugpy",
       "request": "launch",
       "cwd": "/mnt/code-luoxi-pegasus/MAC_ACM_MM/MAC_PyTorch",
-      "module": "SAM3Dbody.main",
+      "module": "SAM3Dbody.main_split",
       "python": "/home/chenkaixu/miniconda3/envs/sam_3d_body/bin/python",
-      // "args": ["--config", "configs/sam3d_body.yaml"]
+      "args": [
+        "infer.workers_per_gpu=1",
+        "infer.data_types=['val']",
+      ]
     },
   ]
 }
