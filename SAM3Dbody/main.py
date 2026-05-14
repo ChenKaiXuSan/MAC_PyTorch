@@ -31,31 +31,13 @@ def process_single_video(
         camera_layers: Optional list of layer indices (0-4) to filter captures.
     """
     rel_video = video_dir.relative_to(source_root)
-    video_id = str(rel_video).replace("/", "__")
 
     log_dir = action_log_root / "action_logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    action_log_file = log_dir / f"{video_id}.log"
-
-    handler = logging.FileHandler(action_log_file, mode="a", encoding="utf-8")
-    handler.setLevel(logging.INFO)
-    handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-
-    video_logger = logging.getLogger(f"action_{video_id}")
-    video_logger.handlers.clear()
-    video_logger.setLevel(logging.INFO)
-    video_logger.addHandler(handler)
-    video_logger.propagate = False
-
-    video_logger.info("==== Start Video: %s ====", rel_video)
-
-    frame_list = load_frames(video_dir)
     
-    if not frame_list:
-        video_logger.warning("No frames found for %s, skipping.", rel_video)
-        return
+    frame_list = load_frames(video_dir)
 
-    video_logger.info(
+    logger.info(
         "Processing %s, frame_count=%d",
         rel_video,
         len(frame_list),
@@ -71,11 +53,13 @@ def process_single_video(
     existing_infer_files = list(infer_dir.glob("*.npz"))
 
     if len(existing_infer_files) == len(frame_list):
-        video_logger.info(
+        logger.info(
             "Inference results already exist for %s, skipping processing.",
             rel_video,
         )
         return
+
+    logger.info("==== Start Video: %s ====", rel_video)
 
     process_frame_list(
         frame_list=frame_list,
@@ -84,7 +68,7 @@ def process_single_video(
         cfg=cfg,
     )
 
-    video_logger.info("==== Finished Video: %s ====", rel_video)
+    logger.info("==== Finished Video: %s ====", rel_video)
 
 
 def dataset_worker(
