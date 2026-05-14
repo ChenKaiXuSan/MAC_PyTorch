@@ -50,5 +50,6 @@ python -m SAM3Dbody.main_split \
     infer.data_types=[${process_flag}] \
     paths.video_split_path=${video_split_path} \
     infer.workers_per_gpu=${workers_per_gpu} \
+    visualizer.plot_2d=false \
 
 echo "🏁 Infer job finished at: $(date)"
