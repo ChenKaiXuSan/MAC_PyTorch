@@ -67,6 +67,16 @@ def process_single_video(
     infer_dir = infer_root / rel_video
     infer_dir.mkdir(parents=True, exist_ok=True)
 
+    # 检查输出目录是否已经存在结果文件，如果存在则跳过处理
+    existing_infer_files = list(infer_dir.glob("*.npz"))
+
+    if len(existing_infer_files) == len(frame_list):
+        video_logger.info(
+            "Inference results already exist for %s, skipping processing.",
+            rel_video,
+        )
+        return
+
     process_frame_list(
         frame_list=frame_list,
         out_dir=out_dir,
