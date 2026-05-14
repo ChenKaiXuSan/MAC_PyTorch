@@ -24,7 +24,7 @@ model:
 visualize:
   save_video: true
   plot_3d: true
-  plot_2d: true
+  plot_2d: false
   plot_skeleton: true
   plot_skeleton_3d: true
 

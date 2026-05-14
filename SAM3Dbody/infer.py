@@ -210,15 +210,16 @@ def process_frame_list(
             continue
 
         # 可视化并保存结果
-        vis_results(
-            img_cv2=frame_list[idx],
-            outputs=[best_person],
-            save_dir=str(out_dir / "visualization" / f"frame_{idx:04d}"),
-            image_name=f"frame_{idx:04d}",
-            faces=estimator.faces,
-            visualizer=visualizer,
-            cfg=cfg.visualize,
-        )
+        if cfg.visualize.plot_2d:
+            vis_results(
+                img_cv2=frame_list[idx],
+                outputs=[best_person],
+                save_dir=str(out_dir / "visualization" / f"frame_{idx:04d}"),
+                image_name=f"frame_{idx:04d}",
+                faces=estimator.faces,
+                visualizer=visualizer,
+                cfg=cfg.visualize,
+            )
 
         outputs = best_person
         # outputs["frame"] = frame_list[idx]

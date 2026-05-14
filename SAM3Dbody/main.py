@@ -101,7 +101,8 @@ def dataset_worker(
     cfg = OmegaConf.create(cfg_dict)
 
     logger.info("[%s] Started processing", dataset_type)
-
+    
+    # TODO：这里从mapping文件里面获取视频列表， 目前先直接glob所有视频文件
     video_dirs: list = list(dataset_source_root.glob("**/*.mp4"))  # Adjust the pattern as needed
     if not video_dirs:
         logger.warning("[%s] No video dirs found", dataset_type)
