@@ -20,18 +20,18 @@ conda activate /home/SKIING/chenkaixu/miniconda3/envs/sam_3d_body
 conda env list
 
 # === 2. 推理参数（按需修改） ===
+PBS_SUBREQNO_PAD=$(printf "%02d" $PBS_SUBREQNO)
 DATA_ROOT="/work/SKIING/chenkaixu/MAC_ACM_MM/data/video"
 OUT_ROOT="/work/SKIING/chenkaixu/MAC_ACM_MM/data/sam3d_body"
-video_split_path=${PROJECT_ROOT}/pegasus/train_split_map/part_${PBS_SUBREQNO}.txt
+video_split_path=${PROJECT_ROOT}/pegasus/train_split_map/part_${PBS_SUBREQNO_PAD}.txt
 
 # 模型
 MODEL_ROOT_PATH="/work/SKIING/chenkaixu/MAC_ACM_MM/MAC_PyTorch/ckpt/sam-3d-body-dinov3"
 
 # 声明普通数组
-my_array=("train")
 
 # 直接通过索引访问
-process_flag="${my_array[$PBS_SUBREQNO]}"
+process_flag="train"
 
 workers_per_gpu=6
 
