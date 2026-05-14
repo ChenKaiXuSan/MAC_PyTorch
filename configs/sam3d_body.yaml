@@ -38,9 +38,6 @@ infer:
   gpu: 0
 
   # Action-based parallel workers per device
-  workers_per_gpu: 3
+  workers_per_gpu: 5
 
-  # Multi-node sharding by action (set from PBS script)
-  shard_count: 1
-  shard_index: 0
   data_types: [train, val, test]

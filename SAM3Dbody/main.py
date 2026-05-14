@@ -110,8 +110,110 @@ def dataset_worker(
 
     logger.info("[%s] Processing %d video dirs", dataset_type, len(video_dirs))
     
-    # 从后往前处理，优先处理最新的视频
-    for one_video_dir in video_dirs[::-1]:
+    # Reverse first so newest videos are dispatched first.
+    video_dirs = list(reversed(video_dirs))
+
+    # Default behavior: run multiple workers on the first configured device.
+    gpu_ids = cfg.infer.get("gpu", 0)
+    
+    workers_per_gpu = int(cfg.infer.get("workers_per_gpu", 1))
+    if workers_per_gpu < 1:
+        logger.warning("[%s] Invalid workers_per_gpu=%s, fallback to 1", dataset_type, workers_per_gpu)
+
+
+    num_workers = min(workers_per_gpu, len(video_dirs))
+    if num_workers <= 1:
+        cfg.infer.gpu = gpu_ids
+        logger.info(
+            "[%s] Single worker mode. gpu=%s, workers_per_gpu=%d",
+            dataset_type,
+            cfg.infer.gpu,
+            workers_per_gpu,
+        )
+        for one_video_dir in video_dirs:
+            try:
+                process_single_video(
+                    one_video_dir,
+                    dataset_source_root,
+                    dataset_vis_root,
+                    dataset_infer_root,
+                    action_log_root,
+                    cfg,
+                )
+            except Exception as exc:
+                logger.error(
+                    "[%s] Failed on action %s: %s",
+                    dataset_type,
+                    one_video_dir.name,
+                    exc,
+                )
+        logger.info("[%s] Finished processing", dataset_type)
+        return
+
+    # Round-robin split keeps workload balanced while preserving newest-first scheduling.
+    video_chunks: List[List[Path]] = [[] for _ in range(num_workers)]
+    for idx, one_video_dir in enumerate(video_dirs):
+        video_chunks[idx % num_workers].append(one_video_dir)
+
+    cfg_dict_local = OmegaConf.to_container(cfg, resolve=True)
+    if not isinstance(cfg_dict_local, dict):
+        logger.error("[%s] Failed to convert worker config to dict", dataset_type)
+        return
+
+    logger.info(
+        "[%s] Parallel mode. gpu_ids=%s, workers_per_gpu=%d, total_workers=%d, use_all_gpus=%s",
+        dataset_type,
+        gpu_ids,
+        workers_per_gpu,
+        num_workers,
+    )
+
+    task_args = []
+    for worker_idx in range(num_workers):
+        chunk = video_chunks[worker_idx]
+        if not chunk:
+            continue
+        task_args.append(
+            (
+                dataset_type,
+                worker_idx,
+                chunk,
+                dataset_source_root,
+                dataset_vis_root,
+                dataset_infer_root,
+                action_log_root,
+                cfg_dict_local,
+            )
+        )
+
+    ctx = mp.get_context("spawn")
+    with ctx.Pool(processes=len(task_args)) as pool:
+        pool.starmap(_process_video_chunk, task_args)
+
+    logger.info("[%s] Finished processing", dataset_type)
+
+
+def _process_video_chunk(
+    dataset_type: str,
+    worker_idx: int,
+    video_dirs: List[Path],
+    dataset_source_root: Path,
+    dataset_vis_root: Path,
+    dataset_infer_root: Path,
+    action_log_root: Path,
+    cfg_dict: dict,
+) -> None:
+    """Process a video chunk in one worker process."""
+    cfg = OmegaConf.create(cfg_dict)
+
+    logger.info(
+        "[%s][worker-%d] Start. gpu=%s, assigned_videos=%d",
+        dataset_type,
+        worker_idx,
+        len(video_dirs),
+    )
+
+    for one_video_dir in video_dirs:
         try:
             process_single_video(
                 one_video_dir,
@@ -123,13 +225,14 @@ def dataset_worker(
             )
         except Exception as exc:
             logger.error(
-                "[%s] Failed on action %s: %s",
+                "[%s][worker-%d] Failed on action %s: %s",
                 dataset_type,
+                worker_idx,
                 one_video_dir.name,
                 exc,
             )
 
-    logger.info("[%s] Finished processing", dataset_type)
+    logger.info("[%s][worker-%d] Finished", dataset_type, worker_idx)
 
 
 def normalize_gpu_ids(raw_gpu_ids) -> List[Union[int, str]]:
