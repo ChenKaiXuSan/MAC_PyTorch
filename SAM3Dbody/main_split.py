@@ -102,7 +102,6 @@ def dataset_worker(
 
     logger.info("[%s] Started processing", dataset_type)
     
-
     video_dirs = []
     
     _idx_path = cfg_dict['paths']['video_split_path'] 
@@ -132,7 +131,6 @@ def dataset_worker(
     if workers_per_gpu < 1:
         logger.warning("[%s] Invalid workers_per_gpu=%s, fallback to 1", dataset_type, workers_per_gpu)
 
-
     num_workers = min(workers_per_gpu, len(video_dirs))
     
     # Round-robin split keeps workload balanced while preserving newest-first scheduling.
@@ -144,14 +142,6 @@ def dataset_worker(
     if not isinstance(cfg_dict_local, dict):
         logger.error("[%s] Failed to convert worker config to dict", dataset_type)
         return
-
-    logger.info(
-        "[%s] Parallel mode. gpu_ids=%s, workers_per_gpu=%d, total_workers=%d, use_all_gpus=%s",
-        dataset_type,
-        gpu_ids,
-        workers_per_gpu,
-        num_workers,
-    )
 
     task_args = []
     for worker_idx in range(num_workers):
