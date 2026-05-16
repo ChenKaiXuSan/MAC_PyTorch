@@ -26,10 +26,7 @@ Date      	By	Comments
 import torch
 import torch.nn.functional as F
 
-from torchvision.io import write_video
-from torchvision.utils import save_image, flow_to_image
-
-from MAC_PyTorch.project.models.make_model import MakeOriginalTwoStream
+from ..models.video_model import build_dual_video_model
 
 from pytorch_lightning import LightningModule
 
@@ -52,12 +49,9 @@ class TwoStreamModule(LightningModule):
         self.num_classes = hparams.model.model_class_num
 
         # model define
-        self.optical_flow_model = Optical_flow()
 
-        self.model = MakeOriginalTwoStream(hparams)
-        self.model_rgb = self.model.make_resnet(3)
-        self.model_flow = self.model.make_resnet(2)
-
+        self.model = build_dual_video_model(hparams.model)
+        
         # save the hyperparameters to the file and ckpt
         self.save_hyperparameters()
 

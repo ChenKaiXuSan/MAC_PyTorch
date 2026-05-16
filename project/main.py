@@ -26,29 +26,22 @@ import hydra
 from omegaconf import DictConfig
 
 from pytorch_lightning import Trainer, seed_everything
-from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.loggers import TensorBoardLogger, CSVLogger
 from pytorch_lightning.callbacks import (
-    TQDMProgressBar,
+    RichProgressBar,
     RichModelSummary,
     ModelCheckpoint,
     EarlyStopping,
     LearningRateMonitor,
 )
 
-from MAC_PyTorch.project.dataloader.data_loader import DataModule
+from dataloader.data_loader import DataModule
 
 #####################################
 # select different experiment trainer 
 #####################################
 
-from MAC_PyTorch.project.trainer.train_two_stream import TwoStreamModule
-
-
-from project.cross_validation import DefineCrossValidation
-from project.helper import save_helper
-
-
-def train(hparams: DictConfig, dataset_idx, fold: int):
+def train(hparams: DictConfig):
     """the train process for the one fold.
 
     Args:
@@ -62,43 +55,31 @@ def train(hparams: DictConfig, dataset_idx, fold: int):
 
     seed_everything(42, workers=True)
 
-    # * select experiment
-    if hparams.train.backbone == "3dcnn":
-        # * ablation study 2: different training strategy
-        if "late_fusion" in hparams.train.experiment:
-            classification_module = LateFusionModule(hparams)
-        elif "single" in hparams.train.experiment:
-            classification_module = SingleModule(hparams)
-        elif hparams.train.temporal_mix:
-            classification_module = TemporalMixModule(hparams)
-        else:
-            raise ValueError(f"the {hparams.train.experiment} is not supported.")
-    elif hparams.train.backbone == "3dcnn_atn":
-        classification_module = BackboneATNModule(hparams)
-    # * compare experiment
-    elif hparams.train.backbone == "two_stream":
-        classification_module = TwoStreamModule(hparams)
-    # * compare experiment
-    elif hparams.train.backbone == "cnn_lstm":
-        classification_module = CNNLstmModule(hparams)
-    # * compare experiment
-    elif hparams.train.backbone == "2dcnn":
-        classification_module = CNNModule(hparams)
-
+    if isinstance(hparams.train.devices, int):
+        devicie = [int(hparams.train.devices)]  # DDP expects a list of device ids, e.g. [0, 1]
+    elif isinstance(hparams.train.devices, list):
+        devicie = hparams.train.devices
     else:
-        raise ValueError("the experiment backbone is not supported.")
+        logging.info(
+            f"Using {hparams.train.devices} GPUs for training, the batch size will be automatically multiplied by the number of GPUs."
+        )
 
-    data_module = WalkDataModule(hparams, dataset_idx)
+    data_module = DataModule(hparams.data)
 
     # for the tensorboard
     tb_logger = TensorBoardLogger(
         save_dir=os.path.join(hparams.train.log_path),
-        name=str(fold),  # here should be str type.
+        name="train",
+    )
+
+    csv_logger = CSVLogger(
+        save_dir=os.path.join(hparams.train.log_path),
+        name="train",
     )
 
     # some callbacks
-    progress_bar = TQDMProgressBar(refresh_rate=100)
-    rich_model_summary = RichModelSummary(max_depth=2)
+    progress_bar = RichProgressBar(leave=True)
+    rich_model_summary = RichModelSummary(max_depth=3)
 
     # define the checkpoint becavier.
     model_check_point = ModelCheckpoint(
@@ -120,14 +101,11 @@ def train(hparams: DictConfig, dataset_idx, fold: int):
     lr_monitor = LearningRateMonitor(logging_interval="step")
 
     trainer = Trainer(
-        devices=[
-            int(hparams.train.gpu_num),
-        ],
         accelerator="gpu",
+        devices=devicie,
+        strategy="ddp",
         max_epochs=hparams.train.max_epochs,
-        # limit_train_batches=2,
-        # limit_val_batches=2,
-        logger=tb_logger,  # wandb_logger,
+        logger=[tb_logger, csv_logger],
         check_val_every_n_epoch=1,
         callbacks=[
             progress_bar,
@@ -136,68 +114,19 @@ def train(hparams: DictConfig, dataset_idx, fold: int):
             early_stopping,
             lr_monitor,
         ],
-        fast_dev_run=hparams.train.fast_dev_run,  # if use fast dev run for debug.
     )
 
-    # trainer.fit(classification_module, data_module)
-
-    # the validate method will wirte in the same log twice, so use the test method.
-    trainer.test(
-        classification_module,
-        data_module,
-        # ckpt_path="best",
-    )
-
-    # TODO: the save helper for 3dnn_atn not implemented yet.
-    if hparams.train.backbone == "3dcnn_atn":
-        pass
-    else:
-        # save_helper(hparams, classification_module, data_module, fold) #! debug only
-        save_helper(
-            hparams,
-            classification_module.load_from_checkpoint(
-                trainer.checkpoint_callback.best_model_path
-            ),
-            data_module,
-            fold,
-        )
+    trainer.fit(classification_module, data_module)
 
 
 @hydra.main(
     version_base=None,
     config_path="../configs", # * the config_path is relative to location of the python script
-    config_name="config.yaml",
+    config_name="train.yaml",
 )
 def init_params(config):
-    #######################
-    # prepare dataset index
-    #######################
 
-    fold_dataset_idx = DefineCrossValidation(config)()
-
-    logging.info("#" * 50)
-    logging.info("Start train all fold")
-    logging.info("#" * 50)
-
-    #########
-    # K fold
-    #########
-    # * for one fold, we first train/val model, then save the best ckpt preds/label into .pt file.
-
-    for fold, dataset_value in fold_dataset_idx.items():
-        logging.info("#" * 50)
-        logging.info("Start train fold: {}".format(fold))
-        logging.info("#" * 50)
-
-        train(config, dataset_value, fold)
-
-        logging.info("#" * 50)
-        logging.info("finish train fold: {}".format(fold))
-        logging.info("#" * 50)
-
-    logging.info("#" * 50)
-    logging.info("finish train all fold")
-    logging.info("#" * 50)
+    train(config)
 
 
 if __name__ == "__main__":
