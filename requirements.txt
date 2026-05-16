@@ -1,6 +1,8 @@
-pytorch-lightning >= 1.0.0rc2
-torch >= 2.2.0
-torchvision >= 0.8.0
+pytorch-lightning 
+torch
+torchvision
+torchaudio
+numpy
 
 # yolo api
 ultralytics
@@ -10,3 +12,10 @@ hydra-core
 
 # for cross validation
 scikit-learn
+opencv-python
+pillow
+timm
+
+# huggingface datasets
+datasets
+transformers

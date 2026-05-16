@@ -25,7 +25,8 @@ from typing import Any, Callable, Dict, Optional, Type
 
 from torch.utils.data import DataLoader
 from pytorch_lightning import LightningDataModule
-from ma52_dataset import MA52Dataset
+from dataloader.ma52_dataset import MA52Dataset
+from torchvision.transforms import Compose, Normalize, Resize
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -38,11 +39,14 @@ class DataModule(LightningDataModule):
         self.sam3d_body_root = Path(opt.sam3d_body_root)
         self.ann_file_root = Path(opt.ann_file_root)
         self.num_frames = opt.num_frames
-        self.transform = opt.transform
-        self.training = opt.training
-        self.fine2coarse = opt.fine2coarse
         self._default_batch_size = opt.batch_size
         self._NUM_WORKERS = opt.num_workers
+
+        # Define the default transform
+        self.transform = Compose([
+            Resize((opt.img_size, opt.img_size)),
+            Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
         
     def prepare_data(self) -> None:
         """here prepare the temp val data path,
@@ -65,8 +69,6 @@ class DataModule(LightningDataModule):
             sam3d_body_root=self.sam3d_body_root / "train",
             num_frames=self.num_frames,
             transform=self.transform,
-            training=self.training,
-            fine2coarse=self.fine2coarse,
         )
 
         self.val_dataset = MA52Dataset(
@@ -75,8 +77,6 @@ class DataModule(LightningDataModule):
             sam3d_body_root=self.sam3d_body_root / "val",
             num_frames=self.num_frames,
             transform=self.transform,
-            training=False,
-            fine2coarse=self.fine2coarse,
         )
 
     def collate_fn(self, batch):

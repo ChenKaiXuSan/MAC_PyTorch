@@ -19,5 +19,18 @@
         "infer.data_types=['val']",
       ]
     },
+    {
+      "name": "train",
+      "type": "debugpy",
+      "request": "launch",
+      "cwd": "/mnt/code-luoxi-pegasus/MAC_ACM_MM/MAC_PyTorch/project",
+      "module": "main",
+      "python": "/home/chenkaixu/miniconda3/envs/mac310/bin/python",
+      "args": [
+        "data.num_workers=0",
+        "data.batch_size=2",
+        "train.max_epochs=1",
+      ]
+    }
   ]
 }

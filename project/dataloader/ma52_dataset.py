@@ -140,17 +140,16 @@ class MA52Dataset(Dataset):
     """
 
     def __init__(self, ann_file: Path, video_root: Path, sam3d_body_root: Path, num_frames: int = 8,
-                 transform=None, training: bool = True, fine2coarse: list = None):
+                 transform=None, fine2coarse: list = None):
 
         self.num_frames = num_frames
         self.transform = transform
-        self.training = training
         _fine2coarse = fine2coarse if fine2coarse is not None else _DEFAULT_FINE2COARSE
         self.samples = self._prepare_sample(ann_file, video_root, sam3d_body_root, _fine2coarse)
 
         self._load_frame: bool = True
-        self._load_2dkpt: bool = True
-        self._load_3dkpt: bool = True
+        self._load_2dkpt: bool = False
+        self._load_3dkpt: bool = False
 
     @staticmethod
     def _prepare_sample(ann_file, video_root, sam3d_body_root, fine2coarse):
@@ -261,15 +260,3 @@ class MA52Dataset(Dataset):
         }
 
         return sample
-
-    @staticmethod
-    def collate_fn(batch):
-        video_names, frames, kpt_2d, kpt_3d, fine_labels, coarse_labels = zip(*batch)
-        return (
-            video_names,
-            torch.stack(frames, dim=0),        # (B, T, C, H, W)
-            torch.stack(kpt_2d),                # (B, T, 70, 2)
-            torch.stack(kpt_3d),                # (B, T, 70, 3)
-            torch.as_tensor(fine_labels),       # (B,)
-            torch.as_tensor(coarse_labels),     # (B,)
-        )

@@ -26,231 +26,147 @@ Date      	By	Comments
 import torch
 import torch.nn.functional as F
 
-from ..models.video_model import build_dual_video_model
+from models.video_model import build_dual_video_model
 
 from pytorch_lightning import LightningModule
+from pytorch_lightning.utilities.types import OptimizerLRScheduler
 
 from torchmetrics.classification import (
     MulticlassAccuracy,
-    MulticlassPrecision,
-    MulticlassRecall,
     MulticlassF1Score,
-    MulticlassConfusionMatrix,
 )
 
-class TwoStreamModule(LightningModule):
+class DualVideoClassificationModule(LightningModule):
 
     def __init__(self, hparams):
         super().__init__()
 
-        # return model type name
-        self.model_type = hparams.model.model
-        self.lr = hparams.optimizer.lr
-        self.num_classes = hparams.model.model_class_num
+        # Support both full config and model-only config.
+        data_cfg = getattr(hparams, "data", hparams)
+        loss_cfg = getattr(hparams, "loss", None)
 
-        # model define
+        self.lr = (
+            getattr(loss_cfg, "lr", 0.001)
+        )
+        self.weight_decay = (
+            getattr(loss_cfg, "weight_decay", 0.01)
+        )
+        self.fine_loss_weight = getattr(loss_cfg, "fine_loss_weight", 1.0)
+        self.coarse_loss_weight = getattr(loss_cfg, "coarse_loss_weight", 1.0)
 
-        self.model = build_dual_video_model(hparams.model)
+        self.num_fine_classes = int(
+            getattr(data_cfg, "fine_class_num", getattr(data_cfg, "num_classes", 52))
+        )
+        self.num_coarse_classes = int(getattr(data_cfg, "coarse_class_num", 7))
+
+        self.model = build_dual_video_model(
+            num_fine=self.num_fine_classes,
+            num_coarse=self.num_coarse_classes,
+        )
         
         # save the hyperparameters to the file and ckpt
-        self.save_hyperparameters()
+        self.save_hyperparameters(ignore=["model"])
 
-        self._accuracy = MulticlassAccuracy(num_classes=self.num_classes)
-        self._precision = MulticlassPrecision(num_classes=self.num_classes)
-        self._recall = MulticlassRecall(num_classes=self.num_classes)
-        self._f1_score = MulticlassF1Score(num_classes=self.num_classes)
-        self._confusion_matrix = MulticlassConfusionMatrix(num_classes=self.num_classes)
+        self.fine_acc = MulticlassAccuracy(num_classes=self.num_fine_classes)
+        self.coarse_acc = MulticlassAccuracy(num_classes=self.num_coarse_classes)
+
+        self.fine_f1_score = MulticlassF1Score(num_classes=self.num_fine_classes, average="macro")
+        self.coarse_f1_score = MulticlassF1Score(num_classes=self.num_coarse_classes, average="macro")
 
     def forward(self, x):
         return self.model(x)
 
-    def training_step(self, batch, batch_idx):
-        """
-        train steop when trainer.fit called
+    def configure_optimizers(self) -> OptimizerLRScheduler:
+        """Configure optimizer and scheduler."""
+        optimizer = torch.optim.AdamW(
+            self.model.parameters(),
+            lr=self.lr,
+            weight_decay=self.weight_decay,
+        )
 
-        Args:
-            batch (3D tensor): b, c, t, h, w
-            batch_idx (_type_): _description_
+        tmax = getattr(self.trainer, "estimated_stepping_batches", None)
+        if not isinstance(tmax, int) or tmax <= 0:
+            tmax = 1000
 
-        Returns:
-            loss: the calc loss
-        """
-
-        video = batch["video"].detach() # b, c, t, h, w
-        label = batch["label"].detach()  # b, c, t, h, w
-        label = label.repeat_interleave(video.size()[2] - 1)
-
-        loss = self.single_logic(label, video)
-
-        return loss
-
-    def validation_step(self, batch, batch_idx):
-        """
-        val step when trainer.fit called.
-
-        Args:
-            batch (3D tensor): b, c, t, h, w
-            batch_idx (_type_): _description_
-
-        Returns:
-            loss: the calc loss
-            accuract: selected accuracy result.
-        """
-
-        # input and model define
-        video = batch["video"].detach()  # b, c, t, h, w
-        label = batch["label"].detach()  # b
-
-        # not use the last frame
-        label = label.repeat_interleave(video.size()[2] - 1)
-        loss = self.single_logic(label, video)
-
-    def test_step(self, batch, batch_idx):
-        """
-        test step when trainer.test called
-
-        Args:
-            batch (3D tensor): b, c, t, h, w
-            batch_idx (_type_): _description_
-        """
-         # input and model define
-        video = batch["video"].detach()  # b, c, t, h, w
-        label = batch["label"].detach()  # b
-
-        # not use the last frame
-        label = label.repeat_interleave(video.size()[2] - 1)
-        loss = self.single_logic(label, video)
-
-    def configure_optimizers(self):
-        """
-        configure the optimizer and lr scheduler
-
-        Returns:
-            optimizer: the used optimizer.
-            lr_scheduler: the selected lr scheduler.
-        """
-
-        optimzier = torch.optim.Adam(self.parameters(), lr=self.lr)
-
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=tmax)
         return {
-            "optimizer": optimzier,
+            "optimizer": optimizer,
             "lr_scheduler": {
-                "scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(optimzier),
+                "scheduler": scheduler,
                 "monitor": "val/loss",
             },
         }
-        # return torch.optim.SGD(self.parameters(), lr=self.lr)
 
-    def _get_name(self):
-        return self.model_type
-
-    def single_logic(self, label: torch.Tensor, video: torch.Tensor):
-
-        # pred the optical flow base RAFT
-        # last_frame = video[:, :, -1, :].unsqueeze(dim=2) # b, c, 1, h, w
-        # OF_video = torch.cat([video, last_frame], dim=2)
-        video_flow = self.optical_flow_model.process_batch(video)  # b, c, t, h, w
-
-        b, c, t, h, w = video.shape
-
-        single_img = video[:, :, :-1, :].reshape(-1, 3, h, w)
-        single_flow = video_flow.contiguous().view(-1, 2, h, w)
-
-        # for i in range(single_img.size()[0]):
-        #     save_image(single_img[i], fp='/workspace/test/rgb_%i.jpg' % i)
-        #     save_image(flow_to_image(single_flow[i]).float() / 255, fp='/workspace/test/flow_%i.jpg' % i)
-
-        # eval model, feed data here
-        if self.training:
-            # ! The temporal mix case is an OOM problem, so clip frames
-            if single_img.shape[0] > 100:
-                single_img = single_img[:100]
-                single_flow = single_flow[:100]
-                label = label[:100]
-
-            pred_video_rgb = self.model_rgb(single_img)
-            pred_video_flow = self.model_flow(single_flow)
-        else:
-            with torch.no_grad():
-                pred_video_rgb = self.model_rgb(single_img)
-                pred_video_flow = self.model_flow(single_flow)
-
-        # squeeze(dim=-1) to keep the torch.Size([1]), not null.
-        loss_rgb = F.cross_entropy(
-            pred_video_rgb.squeeze(dim=-1), label.long()
-        )
-        loss_flow = F.cross_entropy(
-            pred_video_flow.squeeze(dim=-1), label.long()
-        )
-
-        loss = loss_rgb + loss_flow
-        pred_total = (pred_video_rgb + pred_video_flow) / 2
-        self.save_log(pred_total, label, loss)
-
+    def training_step(self, batch, batch_idx):
+        loss = self._shared_step(batch, stage="train")
         return loss
 
-    def save_log(self, pred: torch.Tensor, label: torch.Tensor, loss):
+    def validation_step(self, batch, batch_idx):
+        loss = self._shared_step(batch, stage="val")
+        return loss
 
-        if self.training:
+    def test_step(self, batch, batch_idx):
+        loss = self._shared_step(batch, stage="test")
+        return loss
 
-            preds = pred
-
-            # when torch.size([1]), not squeeze.
-            if preds.size()[0] != 1 or len(preds.size()) != 1:
-                preds = preds.squeeze(dim=-1)
-                pred_softmax = torch.softmax(preds, dim=-1)
+    @staticmethod
+    def _unpack_batch(batch):
+        if isinstance(batch, dict):
+            video = batch.get("frames", batch.get("video"))
+            fine_label = batch.get("fine_label", batch.get("label"))
+            coarse_label = batch.get("coarse_label")
+        elif isinstance(batch, (tuple, list)):
+            if len(batch) >= 5:
+                video, _, _, fine_label, coarse_label = batch[:5]
+            elif len(batch) == 3:
+                video, fine_label, coarse_label = batch
             else:
-                pred_softmax = torch.softmax(preds)
-
-            # video rgb metrics
-            accuracy = self._accuracy(pred_softmax, label)
-            precision = self._precision(pred_softmax, label)
-            recall = self._recall(pred_softmax, label)
-            f1_score = self._f1_score(pred_softmax, label)
-            confusion_matrix = self._confusion_matrix(pred_softmax, label)
-
-            # log to tensorboard
-            self.log_dict(
-                {
-                    "train/loss": loss,
-                    "train/video_acc": accuracy,
-                    "train/video_precision": precision,
-                    "train/video_recall": recall,
-                    "train/video_f1_score": f1_score,
-                },
-                on_epoch=True,
-                on_step=True,
-                batch_size=label.size()[0],
-            )
-
+                raise ValueError(
+                    "Unsupported batch format. Expected dict or tuple/list with >=3 elements."
+                )
         else:
+            raise TypeError(f"Unsupported batch type: {type(batch)}")
 
-            preds = pred
+        if video is None or fine_label is None or coarse_label is None:
+            raise ValueError("Batch must contain video/frames, fine_label and coarse_label.")
 
-            # when torch.size([1]), not squeeze.
-            if preds.size()[0] != 1 or len(preds.size()) != 1:
-                preds = preds.squeeze(dim=-1)
-                pred_softmax = torch.sigmoid(preds)
-            else:
-                pred_softmax = torch.sigmoid(preds)
+        if video.dtype == torch.uint8:
+            video = video.float().div(255.0)
+        else:
+            video = video.float()
 
-            # video rgb metrics
-            accuracy = self._accuracy(pred_softmax, label)
-            precision = self._precision(pred_softmax, label)
-            recall = self._recall(pred_softmax, label)
-            f1_score = self._f1_score(pred_softmax, label)
-            confusion_matrix = self._confusion_matrix(pred_softmax, label)
+        if video.ndim != 5:
+            raise ValueError(f"Expected video shape (B, T, C, H, W), got {tuple(video.shape)}")
 
-            # log to tensorboard
-            self.log_dict(
-                {
-                    "val/loss": loss,
-                    "val/video_acc": accuracy,
-                    "val/video_precision": precision,
-                    "val/video_recall": recall,
-                    "val/video_f1_score": f1_score,
-                },
-                on_epoch=True,
-                on_step=True,
-                batch_size=label.size()[0],
-            )
+        return video, fine_label.long(), coarse_label.long()
+
+    def _log_metrics(self, stage, loss, fine_pred, coarse_pred, fine_label, coarse_label):
+        self.log(
+            f"{stage}/loss",
+            loss,
+            on_step=(stage == "train"),
+            on_epoch=True,
+            prog_bar=(stage != "train"),
+            sync_dist=True,
+        )
+
+        fine_acc_metric = self.fine_acc
+        coarse_acc_metric = self.coarse_acc
+
+        fine_f1_score = self.fine_f1_score
+        coarse_f1_score = self.coarse_f1_score
+
+        self.log(f"{stage}/fine_acc", fine_acc_metric(fine_pred, fine_label), on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log(f"{stage}/coarse_acc", coarse_acc_metric(coarse_pred, coarse_label), on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+
+        self.log(f"{stage}/fine_f1", fine_f1_score(fine_pred, fine_label), on_step=False, on_epoch=True, sync_dist=True, prog_bar=True)
+        self.log(f"{stage}/coarse_f1", coarse_f1_score(coarse_pred, coarse_label), on_step=False, on_epoch=True, sync_dist=True, prog_bar=True)
+
+    def _shared_step(self, batch, stage="train"):
+        video, fine_label, coarse_label = self._unpack_batch(batch)
+
+        fine_pred, coarse_pred = self.model(video)
+        loss = self.fine_loss_weight * F.cross_entropy(fine_pred, fine_label) + self.coarse_loss_weight * F.cross_entropy(coarse_pred, coarse_label)
+
+        self._log_metrics(stage, loss, fine_pred, coarse_pred, fine_label, coarse_label)
+        return loss

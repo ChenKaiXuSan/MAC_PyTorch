@@ -36,6 +36,7 @@ from pytorch_lightning.callbacks import (
 )
 
 from dataloader.data_loader import DataModule
+from trainer.train_dual_video import DualVideoClassificationModule
 
 #####################################
 # select different experiment trainer 
@@ -55,26 +56,21 @@ def train(hparams: DictConfig):
 
     seed_everything(42, workers=True)
 
-    if isinstance(hparams.train.devices, int):
-        devicie = [int(hparams.train.devices)]  # DDP expects a list of device ids, e.g. [0, 1]
-    elif isinstance(hparams.train.devices, list):
-        devicie = hparams.train.devices
-    else:
-        logging.info(
-            f"Using {hparams.train.devices} GPUs for training, the batch size will be automatically multiplied by the number of GPUs."
-        )
-
+    devicie = hparams.train.gpus
+        
     data_module = DataModule(hparams.data)
+
+    classification_module = DualVideoClassificationModule(hparams)
 
     # for the tensorboard
     tb_logger = TensorBoardLogger(
-        save_dir=os.path.join(hparams.train.log_path),
-        name="train",
+        save_dir=os.path.join(hparams.log_path),
+        name="tb_logs",
     )
 
     csv_logger = CSVLogger(
-        save_dir=os.path.join(hparams.train.log_path),
-        name="train",
+        save_dir=os.path.join(hparams.log_path),
+        name="csv_logs",
     )
 
     # some callbacks
