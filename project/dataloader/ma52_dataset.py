@@ -245,16 +245,22 @@ class MA52Dataset(Dataset):
         # time uniform sampling
         if self._load_frame:
             frames = uniform_subsample_along_dim(frames, self.num_frames, dim=0)
+        else:
+            frames = None
         if self._load_2dkpt and kpt_2d is not None:
             kpt_2d = uniform_subsample_along_dim(kpt_2d, self.num_frames, dim=0)
+        else:
+            kpt_2d = torch.zeros((self.num_frames, 70, 2), dtype=torch.float32)  # default to zeros if not loaded
         if self._load_3dkpt and kpt_3d is not None:
             kpt_3d = uniform_subsample_along_dim(kpt_3d, self.num_frames, dim=0)
+        else:            
+            kpt_3d = torch.zeros((self.num_frames, 70, 3), dtype=torch.float32)  # default to zeros if not loaded
 
         sample = {
             "video_name": filename, 
             "frames": frames,  # (T, C, H, W)
-            "kpt_2d": kpt_2d if kpt_2d is not None else None,  # (T, 70, 2)
-            "kpt_3d": kpt_3d if kpt_3d is not None else None,  # (T, 70, 3)
+            "kpt_2d": kpt_2d,  # (T, 70, 2)
+            "kpt_3d": kpt_3d,  # (T, 70, 3)
             "fine_label": fine_label,
             "coarse_label": coarse_label
         }
