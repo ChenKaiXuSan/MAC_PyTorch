@@ -40,8 +40,7 @@ def main(args):
     model = build_dual_video_model(
         model_name_1=args.model_name_1,
         weights_1=args.weights_1,
-        model_name_2=args.model_name_2,
-        weights_2=args.weights_2,
+        vmae_path=args.vmae_path,
         num_fine=len(fine2coarse),
         num_coarse=len(coarse_names),
     ).to(device)
@@ -104,9 +103,8 @@ if __name__ == '__main__':
     parser.add_argument('--model-name-1',     type=str, default='dinov3_convnext_tiny')
     parser.add_argument('--weights-1',        type=str,
                         default='./dinov3_convnext_tiny_pretrain_lvd1689m-21b726bb.pth')
-    parser.add_argument('--model-name-2',     type=str, default='dinov3_convnext_tiny')
-    parser.add_argument('--weights-2',        type=str,
-                        default='./dinov3_convnext_tiny_pretrain_lvd1689m-21b726bb.pth')
+    parser.add_argument('--vmae-path',        type=str, default='OpenGVLab/VideoMAEv2-Base',
+                        help='VideoMAEv2 HuggingFace model ID or local directory')
 
     parser.add_argument('--device',           default='cuda:0')
 

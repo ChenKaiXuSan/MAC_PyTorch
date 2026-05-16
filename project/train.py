@@ -130,8 +130,7 @@ def main(args):
     model = build_dual_video_model(
         model_name_1=args.model_name_1,
         weights_1=args.weights_1,
-        model_name_2=args.model_name_2,
-        weights_2=args.weights_2,
+        vmae_path=args.vmae_path,
         num_fine=len(fine2coarse),
         num_coarse=len(coarse_names),
         d_state=args.mamba_d_state,
@@ -204,7 +203,7 @@ if __name__ == '__main__':
                         help='early stopping: stop if val fine acc does not improve '
                              'for this many epochs (0 = disabled)')
     parser.add_argument('--batch-size',       type=int,   default=32)
-    parser.add_argument('--num-frames',       type=int,   default=8)
+    parser.add_argument('--num-frames',       type=int,   default=16)
     parser.add_argument('--lr',               type=float, default=5e-4)
     parser.add_argument('--wd',               type=float, default=5e-2)
     parser.add_argument('--coarse-weight',    type=float, default=0.5)
@@ -228,18 +227,15 @@ if __name__ == '__main__':
     parser.add_argument('--label-name-file',  type=str, default='')
 
     # ── model ─────────────────────────────────────────────────────────────────
+    # Branch 1: DINOv3-ConvNeXt + Mamba2 → fine head (52 classes)
     parser.add_argument('--model-name-1',     type=str, default='dinov3_convnext_tiny',
                         choices=['dinov3_convnext_tiny', 'dinov3_convnext_small',
-                                 'dinov3_convnext_base', 'dinov3_convnext_large'],
-                        help='branch 1 → fine head (52 classes)')
+                                 'dinov3_convnext_base', 'dinov3_convnext_large'])
     parser.add_argument('--weights-1',        type=str,
                         default='./dinov3_convnext_tiny_pretrain_lvd1689m-21b726bb.pth')
-    parser.add_argument('--model-name-2',     type=str, default='dinov3_convnext_tiny',
-                        choices=['dinov3_convnext_tiny', 'dinov3_convnext_small',
-                                 'dinov3_convnext_base', 'dinov3_convnext_large'],
-                        help='branch 2 → coarse head (7 classes)')
-    parser.add_argument('--weights-2',        type=str,
-                        default='./dinov3_convnext_tiny_pretrain_lvd1689m-21b726bb.pth')
+    # Branch 2: VideoMAEv2 → coarse head (7 classes)
+    parser.add_argument('--vmae-path',        type=str, default='OpenGVLab/VideoMAEv2-Base',
+                        help='VideoMAEv2 HuggingFace model ID or local directory path')
 
     # ── mamba ─────────────────────────────────────────────────────────────────
     parser.add_argument('--mamba-d-state',    type=int,   default=64)
