@@ -23,17 +23,27 @@ Date      	By	Comments
 import logging
 from typing import Any, Callable, Dict, Optional, Type
 
-import torch
 from torch.utils.data import DataLoader
 from pytorch_lightning import LightningDataModule
-from pytorchvideo.data import make_clip_sampler
-from pytorchvideo.data.labeled_video_dataset import labeled_video_dataset
+from ma52_dataset import MA52Dataset
+from pathlib import Path
 
+logger = logging.getLogger(__name__)
 
 class DataModule(LightningDataModule):
     def __init__(self, opt):
         super().__init__()
 
+        self.video_root = Path(opt.video_root)
+        self.sam3d_body_root = Path(opt.sam3d_body_root)
+        self.ann_file_root = Path(opt.ann_file_root)
+        self.num_frames = opt.num_frames
+        self.transform = opt.transform
+        self.training = opt.training
+        self.fine2coarse = opt.fine2coarse
+        self._default_batch_size = opt.batch_size
+        self._NUM_WORKERS = opt.num_workers
+        
     def prepare_data(self) -> None:
         """here prepare the temp val data path,
         because the val dataset not use the gait cycle index,
@@ -49,7 +59,25 @@ class DataModule(LightningDataModule):
         Args:
             stage (Optional[str], optional): trainer.stage, in ('fit', 'validate', 'test', 'predict'). Defaults to None.
         """
-        ...
+        self.train_dataset = MA52Dataset(
+            ann_file=self.ann_file_root / "train_list_videos.txt",
+            video_root=self.video_root / "train",
+            sam3d_body_root=self.sam3d_body_root / "train",
+            num_frames=self.num_frames,
+            transform=self.transform,
+            training=self.training,
+            fine2coarse=self.fine2coarse,
+        )
+
+        self.val_dataset = MA52Dataset(
+            ann_file=self.ann_file_root / "val_list_videos.txt",
+            video_root=self.video_root / "val",
+            sam3d_body_root=self.sam3d_body_root / "val",
+            num_frames=self.num_frames,
+            transform=self.transform,
+            training=False,
+            fine2coarse=self.fine2coarse,
+        )
 
     def collate_fn(self, batch):
         """this function process the batch data, and return the batch data.
@@ -71,7 +99,7 @@ class DataModule(LightningDataModule):
             DataLoader: _description_
         """        
         train_data_loader = DataLoader(
-            self.train_gait_dataset,
+            self.train_dataset,
             batch_size=self._default_batch_size,
             num_workers=self._NUM_WORKERS,
             pin_memory=True,
@@ -88,7 +116,7 @@ class DataModule(LightningDataModule):
             DataLoader: _description_
         """        
         val_data_loader = DataLoader(
-            self.val_gait_dataset,
+            self.val_dataset,
             batch_size=self._default_batch_size,
             num_workers=self._NUM_WORKERS,
             pin_memory=True,
@@ -105,7 +133,7 @@ class DataModule(LightningDataModule):
             DataLoader: 
         """
         test_data_loader = DataLoader(
-            self.test_gait_dataset,
+            self.val_dataset,  # use val dataset to test, because the test dataset not have label
             batch_size=self._default_batch_size,
             num_workers=self._NUM_WORKERS,
             pin_memory=True,
