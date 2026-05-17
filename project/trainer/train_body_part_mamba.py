@@ -56,10 +56,7 @@ class BodyPartMambaClassificationModule(LightningModule):
             getattr(data_cfg, "fine_class_num", getattr(data_cfg, "num_classes", 52))
         )
         self.num_coarse_classes = int(getattr(data_cfg, "coarse_class_num", 7))
-        self.train_target = str(getattr(getattr(hparams, "model", hparams), "train_target", "fine")).lower()
-        if self.train_target not in {"fine", "coarse", "both"}:
-            raise ValueError("model.train_target must be one of: fine, coarse, both")
-
+        
         self.num_joints = int(getattr(data_cfg, "num_joints", 70))
         self.root_idx = int(getattr(data_cfg, "root_idx", 0))
         scale_joints = getattr(data_cfg, "scale_joints", None)
@@ -159,13 +156,11 @@ class BodyPartMambaClassificationModule(LightningModule):
             sync_dist=True,
         )
 
-        if self.train_target in {"fine", "both"}:
-            self.log(f"{stage}/fine_acc", self.fine_acc(fine_pred, fine_label), on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
-            self.log(f"{stage}/fine_f1", self.fine_f1_score(fine_pred, fine_label), on_step=False, on_epoch=True, sync_dist=True, prog_bar=True)
+        self.log(f"{stage}/fine_acc", self.fine_acc(fine_pred, fine_label), on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log(f"{stage}/fine_f1", self.fine_f1_score(fine_pred, fine_label), on_step=False, on_epoch=True, sync_dist=True, prog_bar=True)
 
-        if self.train_target in {"coarse", "both"}:
-            self.log(f"{stage}/coarse_acc", self.coarse_acc(coarse_pred, coarse_label), on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
-            self.log(f"{stage}/coarse_f1", self.coarse_f1_score(coarse_pred, coarse_label), on_step=False, on_epoch=True, sync_dist=True, prog_bar=True)
+        self.log(f"{stage}/coarse_acc", self.coarse_acc(coarse_pred, coarse_label), on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log(f"{stage}/coarse_f1", self.coarse_f1_score(coarse_pred, coarse_label), on_step=False, on_epoch=True, sync_dist=True, prog_bar=True)
 
     def _shared_step(self, batch, stage="train"):
         kpt_3d, fine_label, coarse_label = self._unpack_batch(batch)
@@ -176,13 +171,9 @@ class BodyPartMambaClassificationModule(LightningModule):
         fine_loss = F.cross_entropy(fine_pred, fine_label)
         coarse_loss = F.cross_entropy(coarse_pred, coarse_label)
 
-        if self.train_target == "fine":
-            loss = self.fine_loss_weight * fine_loss
-        elif self.train_target == "coarse":
-            loss = self.coarse_loss_weight * coarse_loss
-        else:
-            loss = self.fine_loss_weight * fine_loss + self.coarse_loss_weight * coarse_loss
-
+        loss = self.fine_loss_weight * fine_loss
+        loss += self.coarse_loss_weight * coarse_loss
+        
         self._log_metrics(stage, loss, fine_pred, coarse_pred, fine_label, coarse_label)
 
         return loss

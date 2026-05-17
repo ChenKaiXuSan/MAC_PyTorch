@@ -22,6 +22,7 @@ Date      	By	Comments
 
 import os
 import logging
+import torch
 import hydra
 from omegaconf import DictConfig
 
@@ -113,12 +114,14 @@ def train(hparams: DictConfig):
             progress_bar,
             rich_model_summary,
             model_check_point,
-            early_stopping,
+            # early_stopping,
             lr_monitor,
         ],
     )
 
     trainer.fit(classification_module, data_module)
+
+    trainer.test(classification_module, data_module, ckpt_path="best", weights_only=False)
 
 
 @hydra.main(
@@ -132,6 +135,6 @@ def init_params(config):
 
 
 if __name__ == "__main__":
-
+    torch.set_float32_matmul_precision('high')
     os.environ["HYDRA_FULL_ERROR"] = "1"
     init_params()
