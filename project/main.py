@@ -37,6 +37,7 @@ from pytorch_lightning.callbacks import (
 
 from dataloader.data_loader import DataModule
 from trainer.train_dual_video import DualVideoClassificationModule
+from trainer.train_body_part_mamba import BodyPartMambaClassificationModule
 
 #####################################
 # select different experiment trainer 
@@ -60,7 +61,12 @@ def train(hparams: DictConfig):
         
     data_module = DataModule(hparams.data)
 
-    classification_module = DualVideoClassificationModule(hparams)
+    if hparams.model.name == "dual_video":
+        classification_module = DualVideoClassificationModule(hparams)
+    elif hparams.model.name == "body_part_mamba":
+        classification_module = BodyPartMambaClassificationModule(hparams)
+    else:
+        raise ValueError(f"Unknown model name: {hparams.model.name}")
 
     # for the tensorboard
     tb_logger = TensorBoardLogger(
@@ -79,17 +85,17 @@ def train(hparams: DictConfig):
 
     # define the checkpoint becavier.
     model_check_point = ModelCheckpoint(
-        filename="{epoch}-{val/loss:.2f}-{val/video_acc:.4f}",
+        filename="{epoch}-{val/loss:.2f}",
         auto_insert_metric_name=False,
-        monitor="val/video_acc",
+        monitor="val/loss",
         mode="max",
-        save_last=False,
+        save_last=True,
         save_top_k=2,
     )
 
     # define the early stop.
     early_stopping = EarlyStopping(
-        monitor="val/video_acc",
+        monitor="val/loss",
         patience=3,
         mode="max",
     )
@@ -98,8 +104,8 @@ def train(hparams: DictConfig):
 
     trainer = Trainer(
         accelerator="gpu",
-        devices=devicie,
-        strategy="ddp",
+        devices=str(devicie),
+        # strategy="ddp",
         max_epochs=hparams.train.max_epochs,
         logger=[tb_logger, csv_logger],
         check_val_every_n_epoch=1,

@@ -42,6 +42,10 @@ class DataModule(LightningDataModule):
         self._default_batch_size = opt.batch_size
         self._NUM_WORKERS = opt.num_workers
 
+        self.load_frames = opt.load_frames
+        self.load_kpt_2d = opt.load_2d_kpt
+        self.load_kpt_3d = opt.load_3d_kpt
+
         # Define the default transform
         self.transform = Compose([
             Resize((opt.img_size, opt.img_size)),
@@ -69,6 +73,9 @@ class DataModule(LightningDataModule):
             sam3d_body_root=self.sam3d_body_root / "train",
             num_frames=self.num_frames,
             transform=self.transform,
+            load_frames=self.load_frames,
+            load_kpt_2d=self.load_kpt_2d,
+            load_kpt_3d=self.load_kpt_3d
         )
 
         self.val_dataset = MA52Dataset(
@@ -77,6 +84,9 @@ class DataModule(LightningDataModule):
             sam3d_body_root=self.sam3d_body_root / "val",
             num_frames=self.num_frames,
             transform=self.transform,
+            load_frames=self.load_frames,
+            load_kpt_2d=self.load_kpt_2d,
+            load_kpt_3d=self.load_kpt_3d
         )
 
     def collate_fn(self, batch):

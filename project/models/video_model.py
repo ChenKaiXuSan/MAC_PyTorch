@@ -1,15 +1,14 @@
 import torch
 import torch.nn as nn
+from contextlib import nullcontext
+from typing import Optional
 from transformers import AutoImageProcessor, AutoModel
 
+from mamba_ssm import Mamba2
 
 # ── feature dimensions ─────────────────────────────────────────────────────────
 
 DINOV3_DIMS = {
-    'dinov3_convnext_tiny':  768,
-    'dinov3_convnext_small': 768,
-    'dinov3_convnext_base':  1024,
-    'dinov3_convnext_large': 1536,
     'facebook/dinov3-convnext-tiny-pretrain-lvd1689m': 768,
     'facebook/dinov3-convnext-small-pretrain-lvd1689m': 768,
     'facebook/dinov3-convnext-base-pretrain-lvd1689m': 1024,
@@ -19,25 +18,36 @@ DINOV3_DIMS = {
 
 # ── backbone loaders ───────────────────────────────────────────────────────────
 
-def load_dinov3_convnext(model_name: str) -> nn.Module:
-    """Load DINOv3-pretrained ConvNeXt from a local .pth file."""
+class DINOv3ConvNeXtBackbone(nn.Module):
+    """DINOv3 ConvNeXt backbone with controllable forward behavior."""
 
-    processor = AutoImageProcessor.from_pretrained(model_name, trust_remote_code=True)
-    dino_model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
+    def __init__(self, model_name: str, freeze: bool = True):
+        super().__init__()
+        processor = AutoImageProcessor.from_pretrained(model_name, trust_remote_code=True)
+        self.backbone = AutoModel.from_pretrained(model_name, trust_remote_code=True)
 
-    dino_model.requires_grad_(False)
+        mean = torch.tensor(processor.image_mean, dtype=torch.float32).view(1, 3, 1, 1)
+        std = torch.tensor(processor.image_std, dtype=torch.float32).view(1, 3, 1, 1)
+        self.register_buffer("dino_mean", mean, persistent=False)
+        self.register_buffer("dino_std", std, persistent=False)
 
-    mean = torch.tensor(
-        processor.image_mean, dtype=torch.float32
-    ).view(1, 3, 1, 1)
-    std = torch.tensor(processor.image_std, dtype=torch.float32).view(
-        1, 3, 1, 1
-    )
-    dino_model.register_buffer("dino_mean", mean, persistent=False)
-    dino_model.register_buffer("dino_std", std, persistent=False)
+        if freeze:
+            self.backbone.requires_grad_(False)
 
+    def forward(
+        self,
+        x: torch.Tensor,
+        return_dict: bool = False,
+    ):
+    
+        out = self.backbone(x, return_dict=True)
 
-    return dino_model
+        if return_dict:
+            return out
+
+        if hasattr(out, "pooler_output") and out.pooler_output is not None:
+            return out.pooler_output
+        return out.last_hidden_state.mean(dim=1)
 
 
 VMAE_DIMS = {
@@ -48,34 +58,44 @@ VMAE_DIMS = {
 }
 
 
-def load_videomae_v2(model_path: str):
-    """Load VideoMAEv2 from HuggingFace hub or a local directory.
+class VideoMAEv2Backbone(nn.Module):
+    """VideoMAEv2 backbone with controllable forward behavior."""
 
-    VideoMAEv2 uses custom code so requires AutoModel + trust_remote_code=True.
-    VideoMAEv1 (MCG-NJU/videomae-*) works with VideoMAEModel directly.
+    def __init__(self, model_path: str, freeze: bool = True):
+        super().__init__()
+        processor = AutoImageProcessor.from_pretrained(model_path, trust_remote_code=True)
+        self.backbone = AutoModel.from_pretrained(
+            model_path,
+            trust_remote_code=True,
+            low_cpu_mem_usage=False,
+        )
 
-    Args:
-        model_path: HuggingFace model ID (e.g. 'OpenGVLab/VideoMAEv2-Base')
-                    or local path to a saved model directory.
+        mean = torch.tensor(processor.image_mean, dtype=torch.float32).view(1, 3, 1, 1)
+        std = torch.tensor(processor.image_std, dtype=torch.float32).view(1, 3, 1, 1)
+        self.register_buffer("vmae_mean", mean, persistent=False)
+        self.register_buffer("vmae_std", std, persistent=False)
 
-    Returns:
-        model:    frozen model
-        feat_dim: hidden size (768 for Base, 1024 for Large, etc.)
-    """
-    processor = AutoImageProcessor.from_pretrained(model_path, trust_remote_code=True)
-    model = AutoModel.from_pretrained(
-        model_path,
-        trust_remote_code=True,
-        low_cpu_mem_usage=False,
-    )
+        if freeze:
+            self.backbone.requires_grad_(False)
 
-    mean = torch.tensor(processor.image_mean, dtype=torch.float32).view(1, 3, 1, 1)
-    std = torch.tensor(processor.image_std, dtype=torch.float32).view(1, 3, 1, 1)
-    model.register_buffer("vmae_mean", mean, persistent=False)
-    model.register_buffer("vmae_std", std, persistent=False)
+    def forward(
+        self,
+        x: torch.Tensor,
+        return_dict: bool = False,
+        cls_only: bool = True,
+    ):
+        
+        out = self.backbone(x, return_dict=True)
 
-    model.requires_grad_(False)
-    return model
+        if return_dict:
+            return out
+
+        if not cls_only:
+            return out.last_hidden_state
+
+        if hasattr(out, "pooler_output") and out.pooler_output is not None:
+            return out.pooler_output
+        return out.last_hidden_state[:, 0]
 
 # ── TCN temporal module (used by DINOv3 branch only) ─────────────────────────
 
@@ -124,16 +144,6 @@ class SpatialTemporalTCN(nn.Module):
         # Global temporal pooling -> (B, D)
         return x.mean(dim=-1)
 
-
-# ── helper ─────────────────────────────────────────────────────────────────────
-
-def _freeze(module: nn.Module) -> nn.Module:
-    for p in module.parameters():
-        p.requires_grad_(False)
-    module.eval()
-    return module
-
-
 # ── main model ─────────────────────────────────────────────────────────────────
 
 class DualBranchVideo(nn.Module):
@@ -160,10 +170,14 @@ class DualBranchVideo(nn.Module):
         kernel_size: int = 3,
         n_layers: int = 1,
         dropout: float = 0.0,
+        no_grad_convnext: bool = True,
+        no_grad_vmae: bool = True,
     ):
         super().__init__()
-        self.convnext = _freeze(convnext)
-        self.vmae     = _freeze(vmae)
+        self.convnext = convnext
+        self.vmae     = vmae
+        self.no_grad_convnext = no_grad_convnext
+        self.no_grad_vmae = no_grad_vmae
 
         self.temporal    = SpatialTemporalTCN(
             d_model=convnext_dim,
@@ -180,20 +194,37 @@ class DualBranchVideo(nn.Module):
         self.vmae.eval()
         return self
 
-    def forward(self, x: torch.Tensor):
+    def forward(
+        self,
+        x: torch.Tensor,
+        no_grad_convnext: Optional[bool] = None,
+        no_grad_vmae: Optional[bool] = None,
+    ):
         # x: (B, T, C, H, W)
         B, T, C, H, W = x.shape
 
+        if no_grad_convnext is None:
+            no_grad_convnext = self.no_grad_convnext
+        if no_grad_vmae is None:
+            no_grad_vmae = self.no_grad_vmae
+
         # ── Branch 1: DINOv3-ConvNeXt + TCN ─────────────────────────────────
-        with torch.no_grad():
-            f1 = self.convnext(x.view(B * T, C, H, W))  # (B*T, D1)
-        f1 = self.temporal(f1.pooler_output.view(B, T, -1))  # (B, D1)
+        f1 = self.convnext(
+            x.view(B * T, C, H, W),
+            use_no_grad=no_grad_convnext,
+            return_dict=False,
+        )
+        f1 = self.temporal(f1.view(B, T, -1))  # (B, D1)
         fine_logits = self.fine_head(f1)          # (B, num_fine)
 
         # ── Branch 2: VideoMAEv2 (full clip) ─────────────────────────────────
         # VideoMAEv2 expects (B, C, T, H, W); our x is (B, T, C, H, W)
-        with torch.no_grad():
-            f2 = self.vmae(x.permute(0, 2, 1, 3, 4))  # (B, D2)
+        f2 = self.vmae(
+            x.permute(0, 2, 1, 3, 4),
+            use_no_grad=no_grad_vmae,
+            return_dict=False,
+            cls_only=True,
+        )
         coarse_logits = self.coarse_head(f2)       # (B, num_coarse)
 
         return fine_logits, coarse_logits
@@ -214,8 +245,8 @@ def build_dual_video_model(
     n_layers: int = 1,
     dropout: float = 0.0,
 ) -> DualBranchVideo:
-    convnext = load_dinov3_convnext(model_name_1)
-    vmae = load_videomae_v2(vmae_path)
+    convnext = DINOv3ConvNeXtBackbone(model_name=model_name_1, freeze=True)
+    vmae = VideoMAEv2Backbone(model_path=vmae_path, freeze=True)
     return DualBranchVideo(
         convnext, vmae,
         convnext_dim=DINOV3_DIMS[model_name_1],

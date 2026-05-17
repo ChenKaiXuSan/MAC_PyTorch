@@ -23,13 +23,16 @@
       "name": "train",
       "type": "debugpy",
       "request": "launch",
-      "cwd": "/mnt/code-luoxi-pegasus/MAC_ACM_MM/MAC_PyTorch/project",
-      "module": "main",
+      "cwd": "/mnt/code-luoxi-pegasus/MAC_ACM_MM/MAC_PyTorch",
+      "program": "project/main.py",
       "python": "/home/chenkaixu/miniconda3/envs/mac310/bin/python",
       "args": [
-        "data.num_workers=0",
-        "data.batch_size=2",
+        // "data.num_workers=0",
+        // "data.batch_size=2",
         "train.max_epochs=1",
+        "model.name=body_part_mamba",
+        "data.load_frames=false",
+        "data.load_3d_kpt=true",
       ]
     }
   ]

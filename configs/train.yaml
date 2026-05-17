@@ -19,31 +19,32 @@ data:
   ann_file_root: "/mnt/code-luoxi-pegasus/MAC_ACM_MM/data/annotations/"
 
   img_size: 224
-  num_frames: 16 # number of frames to sample from each video
+  num_frames: 32 # number of frames to sample from each video
 
-  load_frames: true 
+  load_frames: false
   load_2d_kpt: false
-  load_3d_kpt: false
+  load_3d_kpt: true
 
-  num_workers: 16
-  batch_size: 16
+  num_workers: 32
+  batch_size: 32
 
   coarse_class_num : 7 # number of coarse classes for dualvideo
   fine_class_num : 52 # number of fine classes for dualvideo
 
 model:
-  backbone: dualvideo # dual2pose, pose2equip
+  name: body_part_mamba # body_part_mamba or dual_video
 
 train:
   # Training config
   max_epochs: 50 # numer of epochs of training
-  gpus: 2
+  gpus: 1
 
-# Used only when model.backbone=pose2equip
-dualvideo:
+# Used only when model.name=pose2equip
+
+body_part_mamba:
   num_joints: 15
-  dino_model_name: facebook/dinov2-base
-  dino_freeze: true
-  dino_image_size: 224
+  mamba_model_name: "mamba_ssm/moge2"
+  mamba_freeze: true
+  mamba_image_size: 224
 
-log_path: logs/${model.backbone}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+log_path: logs/${model.name}/${now:%Y-%m-%d}/${now:%H-%M-%S}

@@ -3,8 +3,6 @@ name: mac311
 
 # 2. 软件源：决定了下载速度和包的丰富程度
 channels:
-  - pytorch          # 专门存放 PyTorch 相关包
-  - nvidia           # 专门存放 CUDA 工具包
   - conda-forge      # 社区维护的最全镜像源（推荐优先使用）
   - defaults         # 官方默认源
 
@@ -23,15 +21,12 @@ dependencies:
   - pillow
   
   # --- 深度学习核心 (GPU 版本) ---
-  - pytorch
-  - torchvision
-  - torchaudio
-  - pytorch-cuda=12.1  # 根据你的显卡驱动调整 (11.8 或 12.1)
+  - torch=2.9.1
+  - torchvision=0.24.1
   - pytorch-lightning
   
   # --- 项目特定配置 (Hydra/YOLO等) ---
   - hydra-core
-  - ultralytics
   - datasets
   - transformers
   - timm
