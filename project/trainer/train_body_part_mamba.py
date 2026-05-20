@@ -156,6 +156,9 @@ class BodyPartMambaClassificationModule(LightningModule):
             sync_dist=True,
         )
 
+        self.log(f"{stage}/fine_loss", F.cross_entropy(fine_pred, fine_label), on_step=(stage == "train"), on_epoch=True, prog_bar=False, sync_dist=True)
+        self.log(f"{stage}/coarse_loss", F.cross_entropy(coarse_pred, coarse_label), on_step=(stage == "train"), on_epoch=True, prog_bar=False, sync_dist=True)
+        
         self.log(f"{stage}/fine_acc", self.fine_acc(fine_pred, fine_label), on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
         self.log(f"{stage}/fine_f1", self.fine_f1_score(fine_pred, fine_label), on_step=False, on_epoch=True, sync_dist=True, prog_bar=True)
 
@@ -171,9 +174,8 @@ class BodyPartMambaClassificationModule(LightningModule):
         fine_loss = F.cross_entropy(fine_pred, fine_label)
         coarse_loss = F.cross_entropy(coarse_pred, coarse_label)
 
-        loss = self.fine_loss_weight * fine_loss
-        loss += self.coarse_loss_weight * coarse_loss
-        
+        loss = 0.5 * (self.fine_loss_weight * fine_loss + self.coarse_loss_weight * coarse_loss)
+
         self._log_metrics(stage, loss, fine_pred, coarse_pred, fine_label, coarse_label)
 
         return loss

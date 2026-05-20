@@ -154,8 +154,49 @@ class MA52Dataset(Dataset):
         cap.release()
         return torch.stack(frames, dim=0).permute(0, 3, 1, 2)  # (T, C, H, W)
 
+    @staticmethod
+    def _extract_bbox(_info) -> Optional[torch.Tensor]:
+        """Extract a single bbox tensor (x_min, y_min, x_max, y_max) from sam3d output dict."""
+        bbox_keys = [
+            "pred_bbox",
+            "pred_bboxes",
+            "bbox",
+            "bboxes",
+            "body_bbox",
+            "person_bbox",
+        ]
+
+        for key in bbox_keys:
+            if key not in _info:
+                continue
+
+            bbox = _info[key]
+            if bbox is None:
+                continue
+
+            if isinstance(bbox, dict):
+                if all(k in bbox for k in ("x_min", "y_min", "x_max", "y_max")):
+                    return torch.tensor(
+                        [bbox["x_min"], bbox["y_min"], bbox["x_max"], bbox["y_max"]],
+                        dtype=torch.float32,
+                    )
+                if all(k in bbox for k in ("x1", "y1", "x2", "y2")):
+                    return torch.tensor(
+                        [bbox["x1"], bbox["y1"], bbox["x2"], bbox["y2"]],
+                        dtype=torch.float32,
+                    )
+                continue
+
+            bbox_np = np.asarray(bbox)
+            if bbox_np.ndim == 1 and bbox_np.shape[0] >= 4:
+                return torch.tensor(bbox_np[:4], dtype=torch.float32)
+            if bbox_np.ndim >= 2 and bbox_np.shape[-1] >= 4:
+                return torch.tensor(bbox_np.reshape(-1, bbox_np.shape[-1])[0, :4], dtype=torch.float32)
+
+        return None
+
     def _load_sam3d_body(self, sam3d_body_path: str, non_detected_idx: Optional[set]):
-        kpt_2d, kpt_3d = None, None
+        kpt_2d, kpt_3d, bbox = None, None, None
 
         _info = np.load(sam3d_body_path, allow_pickle=True)['output'].item()
 
@@ -169,7 +210,9 @@ class MA52Dataset(Dataset):
             # load 3d keypoints (T, 17, 3)
             kpt_3d = _info['pred_keypoints_3d']  # (total_frames, 17, 3)
 
-        return kpt_2d, kpt_3d
+        bbox = self._extract_bbox(_info)
+
+        return kpt_2d, kpt_3d, bbox
 
     @staticmethod
     def _ensure_frame_kpt_shape(kpt: torch.Tensor) -> torch.Tensor:
@@ -186,8 +229,9 @@ class MA52Dataset(Dataset):
 
         kpt_2d_frames = []
         kpt_3d_frames = []
+        bbox_frames = []
         for sam3d_body_path in selected_paths:
-            kpt_2d, kpt_3d = self._load_sam3d_body(sam3d_body_path, None)
+            kpt_2d, kpt_3d, bbox = self._load_sam3d_body(sam3d_body_path, None)
 
             if self._load_2dkpt and kpt_2d is not None:
                 kpt_2d_t = torch.from_numpy(kpt_2d)
@@ -197,6 +241,8 @@ class MA52Dataset(Dataset):
                 kpt_3d_t = torch.from_numpy(kpt_3d)
                 kpt_3d_frames.append(self._ensure_frame_kpt_shape(kpt_3d_t))
 
+            bbox_frames.append(bbox)
+
         kpt_2d_out = None
         kpt_3d_out = None
         if self._load_2dkpt and len(kpt_2d_frames) > 0:
@@ -204,7 +250,7 @@ class MA52Dataset(Dataset):
         if self._load_3dkpt and len(kpt_3d_frames) > 0:
             kpt_3d_out = torch.stack(kpt_3d_frames, dim=0)
 
-        return kpt_2d_out, kpt_3d_out
+        return kpt_2d_out, kpt_3d_out, bbox_frames
 
     def _compute_sample_indices(
         self,
@@ -238,6 +284,35 @@ class MA52Dataset(Dataset):
 
         return video_idx, kpt_idx
 
+    def _clip_frame_with_bbox(self, frame: torch.Tensor, bbox: torch.Tensor) -> torch.Tensor:
+        """Clip the frame with the given bbox.
+
+        Args:
+            frame: (C, H, W)
+            bbox: (4,) in (x_min, y_min, x_max, y_max) format
+
+        Returns:
+            Clipped frame of shape (C, H, W) with zero padding if bbox goes out of bounds.
+        """
+        _, h, w = frame.shape
+        x_min, y_min, x_max, y_max = bbox.int().tolist()
+
+        # Compute intersection with frame boundaries
+        x_min_clipped = max(x_min, 0)
+        y_min_clipped = max(y_min, 0)
+        x_max_clipped = min(x_max, w)
+        y_max_clipped = min(y_max, h)
+
+        # Initialize output with zeros
+        clipped_frame = torch.zeros_like(frame)
+
+        # Compute the region to copy from the original frame
+        if x_min_clipped < x_max_clipped and y_min_clipped < y_max_clipped:
+            clipped_frame[:, y_min_clipped:y_max_clipped, x_min_clipped:x_max_clipped] = frame[
+                :, y_min_clipped:y_max_clipped, x_min_clipped:x_max_clipped
+            ]
+
+        return clipped_frame
     def __len__(self):
         return len(self.samples)
 
@@ -249,8 +324,9 @@ class MA52Dataset(Dataset):
         frames = None
         kpt_2d = None
         kpt_3d = None
+        bboxes = None
         
-        # 1. 计算采样索引
+        # 计算采样索引
         video_total = None
         if self._load_frame:
             cap = cv2.VideoCapture(video_path)
@@ -261,7 +337,8 @@ class MA52Dataset(Dataset):
             if video_total <= 0:
                 raise RuntimeError(f"Empty video: {video_path}")
 
-        kpt_total = len(sam3d_body_path_list) if (self._load_2dkpt or self._load_3dkpt) else None
+        # Need bbox even when only loading frames, so include frame-only mode here.
+        kpt_total = len(sam3d_body_path_list) if (self._load_2dkpt or self._load_3dkpt or self._load_frame) else None
         if kpt_total is not None and kpt_total <= 0:
             kpt_total = None
 
@@ -272,17 +349,29 @@ class MA52Dataset(Dataset):
             assert frame_indices is not None
             frames = self._read_frames_by_indices(video_path, frame_indices)
 
+        if self._load_2dkpt or self._load_3dkpt or self._load_frame:
+            if len(sam3d_body_path_list) > 0 and kpt_indices is not None:
+                kpt_2d, kpt_3d, bboxes = self._load_kpts_by_indices(sam3d_body_path_list, kpt_indices)
+            else:
+                kpt_2d, kpt_3d = None, None
+                bboxes = None
+
+        # Clip frame with sampled bboxes from sam3d output
+        if self._load_frame and frames is not None and bboxes is not None:
+            clipped_frames = []
+            for i in range(frames.shape[0]):
+                bbox_i = bboxes[i] if i < len(bboxes) else None
+                if bbox_i is None:
+                    clipped_frames.append(frames[i])
+                else:
+                    clipped_frames.append(self._clip_frame_with_bbox(frames[i], bbox_i.to(frames[i].device)))
+            frames = torch.stack(clipped_frames, dim=0)
+
+        if self._load_frame:
             if self.transform is not None:
                 frames = [self.transform(f) for f in frames]
                 frames = torch.stack(frames, dim=0)  # (T, C, H, W)
 
-        if self._load_2dkpt or self._load_3dkpt:
-            if len(sam3d_body_path_list) > 0 and kpt_indices is not None:
-                kpt_2d, kpt_3d = self._load_kpts_by_indices(sam3d_body_path_list, kpt_indices)
-            else:
-                kpt_2d, kpt_3d = None, None
-
-        # time uniform sampling
         if not self._load_frame or frames is None:
             frames = torch.zeros((self.num_frames, 3, 224, 224), dtype=torch.float32)  # default to zeros if not loaded
         if not (self._load_2dkpt and kpt_2d is not None):

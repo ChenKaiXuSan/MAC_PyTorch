@@ -39,6 +39,7 @@ from pytorch_lightning.callbacks import (
 from dataloader.data_loader import DataModule
 from trainer.train_dual_video import DualVideoClassificationModule
 from trainer.train_body_part_mamba import BodyPartMambaClassificationModule
+from trainer.train_skeleton_video import SkeletonVideoClassificationModule
 
 #####################################
 # select different experiment trainer 
@@ -66,6 +67,8 @@ def train(hparams: DictConfig):
         classification_module = DualVideoClassificationModule(hparams)
     elif hparams.model.name == "body_part_mamba":
         classification_module = BodyPartMambaClassificationModule(hparams)
+    elif hparams.model.name == "skeleton_video":
+        classification_module = SkeletonVideoClassificationModule(hparams)
     else:
         raise ValueError(f"Unknown model name: {hparams.model.name}")
 
