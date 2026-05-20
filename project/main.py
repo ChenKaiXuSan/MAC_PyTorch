@@ -89,6 +89,7 @@ def train(hparams: DictConfig):
 
     # define the checkpoint becavier.
     model_check_point = ModelCheckpoint(
+        dirpath=os.path.join(hparams.log_path),
         filename="{epoch}-{val/loss:.2f}",
         auto_insert_metric_name=False,
         monitor="val/loss",
@@ -124,7 +125,10 @@ def train(hparams: DictConfig):
 
     trainer.fit(classification_module, data_module)
 
-    trainer.test(classification_module, data_module, ckpt_path="best", weights_only=False)
+    test_metrics = trainer.test(classification_module, data_module, ckpt_path="best", weights_only=False)
+
+    with open(os.path.join(hparams.log_path, "test_metrics.txt"), "w") as f:
+        f.write(str(test_metrics))
 
 
 @hydra.main(

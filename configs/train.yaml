@@ -26,7 +26,7 @@ data:
   load_3d_kpt: true
 
   num_workers: 32
-  batch_size: 16
+  batch_size: 32
 
   coarse_class_num : 7 # number of coarse classes for dualvideo
   fine_class_num : 52 # number of fine classes for dualvideo
