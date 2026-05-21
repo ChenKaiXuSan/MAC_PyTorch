@@ -313,6 +313,7 @@ class MA52Dataset(Dataset):
             ]
 
         return clipped_frame
+        
     def __len__(self):
         return len(self.samples)
 
@@ -357,6 +358,7 @@ class MA52Dataset(Dataset):
                 bboxes = None
 
         # Clip frame with sampled bboxes from sam3d output
+        # bboxes = None
         if self._load_frame and frames is not None and bboxes is not None:
             clipped_frames = []
             for i in range(frames.shape[0]):

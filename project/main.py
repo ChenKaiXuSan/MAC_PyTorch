@@ -89,7 +89,7 @@ def train(hparams: DictConfig):
 
     # define the checkpoint becavier.
     model_check_point = ModelCheckpoint(
-        dirpath=os.path.join(hparams.log_path),
+        dirpath=os.path.join(hparams.log_path, "checkpoints"),
         filename="{epoch}-{val/loss:.2f}",
         auto_insert_metric_name=False,
         monitor="val/loss",

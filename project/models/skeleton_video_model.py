@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from typing import Optional, Tuple
+from typing import Optional, Tuple, cast
 from transformers import AutoImageProcessor, AutoModel
 
 try:
@@ -36,9 +36,18 @@ class DINOv3ConvNeXtBackbone(nn.Module):
         b, t, c, h, w = x.shape
         if x.dtype != torch.float32:
             x = x.float()
+
+        # Support both raw pixels and already-normalized tensors.
+        # 1) uint8/0-255 -> scale to [0, 1]
         if x.max() > 1.5:
             x = x / 255.0
-        x = (x - self.dino_mean) / (self.dino_std + 1e-6)
+
+        # 2) only normalize if tensor still looks like non-normalized image range
+        # (typically in [0, 1]); skip to avoid double-normalization.
+        if x.min() >= 0.0 and x.max() <= 1.5:
+            dino_mean = cast(torch.Tensor, self.dino_mean)
+            dino_std = cast(torch.Tensor, self.dino_std)
+            x = (x - dino_mean) / (dino_std + 1e-6)
 
         out = self.backbone(x.view(b * t, c, h, w), return_dict=True)
         if hasattr(out, "pooler_output") and out.pooler_output is not None:
@@ -168,11 +177,7 @@ class SkeletonVideoMambaClassifier(nn.Module):
         fine_logits = self.fine_classifier(feat)
 
         # coarse branch: dino + mamba
-        coarse_logits = None
-    
-        if frames.ndim != 5:
-            raise ValueError(f"Expected frames shape (B, T, C, H, W), got {tuple(frames.shape)}")
-        dino_feat = self.dino_backbone(frames)
+        dino_feat = self.dino_backbone(frames) # (B, T, dino_d_model)
         dino_feat = self.dino_proj(dino_feat)
         dino_feat = dino_feat + self.dino_mamba(self.dino_pre_norm(dino_feat))
         dino_feat = self.dino_post_norm(dino_feat)
