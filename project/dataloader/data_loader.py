@@ -47,10 +47,9 @@ class DataModule(LightningDataModule):
         self.load_kpt_3d = opt.load_3d_kpt
 
         # Define the default transform
-        # self.transform = Compose([
-        #     Resize((opt.img_size, opt.img_size)),
-        # ])
-        self.transform = None
+        self.transform = Compose([
+            Resize((opt.img_size, opt.img_size)),
+        ])
         
     def prepare_data(self) -> None:
         """here prepare the temp val data path,

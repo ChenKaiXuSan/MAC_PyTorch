@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding:utf-8 -*-
-'''
+"""
 File: /workspace/deep-learning-project-template/project/main.py
 Project: /workspace/deep-learning-project-template/project
 Created Date: Friday November 29th 2024
@@ -18,7 +18,7 @@ Copyright (c) 2024 The University of Tsukuba
 HISTORY:
 Date      	By	Comments
 ----------	---	---------------------------------------------------------
-'''
+"""
 
 import os
 import logging
@@ -42,8 +42,9 @@ from trainer.train_body_part_mamba import BodyPartMambaClassificationModule
 from trainer.train_skeleton_video import SkeletonVideoClassificationModule
 
 #####################################
-# select different experiment trainer 
+# select different experiment trainer
 #####################################
+
 
 def train(hparams: DictConfig):
     """the train process for the one fold.
@@ -60,7 +61,7 @@ def train(hparams: DictConfig):
     seed_everything(42, workers=True)
 
     devicie = hparams.train.gpus
-        
+
     data_module = DataModule(hparams.data)
 
     if hparams.model.name == "dual_video":
@@ -125,15 +126,21 @@ def train(hparams: DictConfig):
 
     trainer.fit(classification_module, data_module)
 
-    test_metrics = trainer.test(classification_module, data_module, ckpt_path="best", weights_only=False)
+    test_metrics = trainer.test(
+        classification_module, data_module, ckpt_path="best", weights_only=False
+    )
+
+    if len(test_metrics) == 1:
+        test_metrics = test_metrics[0]  # unpack the single dict from the list
 
     with open(os.path.join(hparams.log_path, "test_metrics.txt"), "w") as f:
-        f.write(str(test_metrics))
+        for metric_name, metric_value in test_metrics.items():
+            f.write(f"{metric_name}: {metric_value}\n")
 
 
 @hydra.main(
     version_base=None,
-    config_path="../configs", # * the config_path is relative to location of the python script
+    config_path="../configs",  # * the config_path is relative to location of the python script
     config_name="train.yaml",
 )
 def init_params(config):
@@ -142,6 +149,6 @@ def init_params(config):
 
 
 if __name__ == "__main__":
-    torch.set_float32_matmul_precision('high')
+    torch.set_float32_matmul_precision("high")
     os.environ["HYDRA_FULL_ERROR"] = "1"
     init_params()

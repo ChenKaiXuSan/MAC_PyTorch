@@ -183,5 +183,8 @@ class SkeletonVideoClassificationModule(LightningModule):
 
 		loss = self.fine_loss_weight * fine_loss + self.coarse_loss_weight * coarse_loss
 
+		self.log(f"{stage}/fine_loss", fine_loss, on_step=(stage == "train"), on_epoch=True, prog_bar=False, sync_dist=True)
+		self.log(f"{stage}/coarse_loss", coarse_loss, on_step=(stage == "train"), on_epoch=True, prog_bar=False, sync_dist=True)
+
 		self._log_metrics(stage, loss, fine_logits, coarse_logits, fine_label, coarse_label)
 		return loss

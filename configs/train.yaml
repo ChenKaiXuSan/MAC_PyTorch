@@ -11,7 +11,7 @@ loss:
   weight_decay: 0.01
 
   fine_loss_weight: 1.0
-  coarse_loss_weight: 0.5
+  coarse_loss_weight: 1.0
 
 data:
   video_root: "/mnt/code-luoxi-pegasus/MAC_ACM_MM/data/video"
@@ -19,14 +19,14 @@ data:
   ann_file_root: "/mnt/code-luoxi-pegasus/MAC_ACM_MM/data/annotations/"
 
   img_size: 224
-  num_frames: 32 # number of frames to sample from each video
+  num_frames: 16 # number of frames to sample from each video
 
   load_frames: false
   load_2d_kpt: false
   load_3d_kpt: true
 
   num_workers: 32
-  batch_size: 16
+  batch_size: 32
 
   coarse_class_num : 7 # number of coarse classes for dualvideo
   fine_class_num : 52 # number of fine classes for dualvideo
