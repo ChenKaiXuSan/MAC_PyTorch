@@ -111,7 +111,7 @@ def train(hparams: DictConfig):
     trainer = Trainer(
         accelerator="gpu",
         devices=str(devicie),
-        # strategy="ddp",
+        strategy="ddp",
         max_epochs=hparams.train.max_epochs,
         logger=[tb_logger, csv_logger],
         check_val_every_n_epoch=1,
