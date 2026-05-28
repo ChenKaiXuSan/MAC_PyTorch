@@ -347,3 +347,218 @@ def get_params_groups(model: torch.nn.Module, weight_decay: float = 1e-5):
 
     print("Param groups = %s" % json.dumps(parameter_group_names, indent=2))
     return list(parameter_group_vars.values())
+
+
+import torch.nn.functional as F
+from sklearn.metrics import f1_score
+
+
+def train_one_epoch_single(model, optimizer, loader, device, epoch, scheduler,
+                            label_key: str = 'coarse', amp_dtype=torch.bfloat16):
+    """Train one epoch on a SINGLE branch (coarse XOR fine).
+
+    label_key: 'coarse' uses coarse_labels; 'fine' uses fine_labels.
+    """
+    model.train()
+    accu_loss = 0.0
+    accu_correct = 0
+    n_seen = 0
+    scaler_dtype = amp_dtype
+
+    optimizer.zero_grad()
+    loader = tqdm(loader, file=sys.stdout)
+    for step, (frames, fine_labels, coarse_labels) in enumerate(loader):
+        frames = frames.to(device)
+        labels = (coarse_labels if label_key == 'coarse' else fine_labels).to(device)
+        with torch.autocast(device_type='cuda', dtype=scaler_dtype):
+            logits = model(frames)
+            loss = F.cross_entropy(logits, labels)
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+        scheduler.step()
+
+        accu_loss += loss.item()
+        accu_correct += (logits.argmax(-1) == labels).sum().item()
+        n_seen += labels.size(0)
+        loader.desc = (f'[train {label_key} ep {epoch}] '
+                       f'loss={accu_loss/(step+1):.3f} acc={accu_correct/n_seen:.3f} '
+                       f'lr={optimizer.param_groups[0]["lr"]:.2e}')
+    return accu_loss / (step + 1), accu_correct / n_seen
+
+
+@torch.no_grad()
+def evaluate_single(model, loader, device, label_key: str = 'coarse', amp_dtype=torch.bfloat16):
+    """Evaluate single branch. Returns dict with f1_macro, f1_micro, acc."""
+    model.eval()
+    all_pred, all_gt = [], []
+    loader = tqdm(loader, file=sys.stdout)
+    for step, (frames, fine_labels, coarse_labels) in enumerate(loader):
+        frames = frames.to(device)
+        labels = (coarse_labels if label_key == 'coarse' else fine_labels).to(device)
+        with torch.autocast(device_type='cuda', dtype=amp_dtype):
+            logits = model(frames)
+        all_pred.extend(logits.argmax(-1).cpu().tolist())
+        all_gt.extend(labels.cpu().tolist())
+
+    f1_macro = f1_score(all_gt, all_pred, average='macro', zero_division=0)
+    f1_micro = f1_score(all_gt, all_pred, average='micro', zero_division=0)
+    acc = sum(p == g for p, g in zip(all_pred, all_gt)) / len(all_gt)
+    return {'f1_macro': f1_macro, 'f1_micro': f1_micro, 'acc': acc}
+
+
+def ensemble_fine_with_coarse(p_fine: torch.Tensor, p_coarse: torch.Tensor,
+                               fine2coarse: torch.Tensor) -> torch.Tensor:
+    """Soft ensembling: p_fine *= p_coarse[fine2coarse]; renormalize.
+
+    p_fine:    (B, 52) softmaxed
+    p_coarse:  (B, 7)  softmaxed
+    fine2coarse: (52,) long
+    Returns:   (B, 52)
+    """
+    coarse_w = p_coarse[:, fine2coarse]  # (B, 52)
+    refined = p_fine * coarse_w
+    return refined / refined.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+
+
+@torch.no_grad()
+def evaluate_dual(model, loader, device, fine2coarse: list,
+                   amp_dtype=torch.bfloat16):
+    """Evaluate dual-branch model. Returns dict with 4 F1s + F1_mean.
+
+    F1_body_* on coarse predictions, F1_action_* on ensembling-refined fine predictions.
+    """
+    model.eval()
+    fc_tensor = torch.as_tensor(fine2coarse, dtype=torch.long, device=device)
+
+    all_fine, all_coarse, all_fine_gt, all_coarse_gt = [], [], [], []
+    loader = tqdm(loader, file=sys.stdout)
+    for frames, fine_labels, coarse_labels in loader:
+        frames = frames.to(device)
+        with torch.autocast(device_type='cuda', dtype=amp_dtype):
+            fine_logits, coarse_logits = model(frames)
+        p_fine = fine_logits.softmax(-1)
+        p_coarse = coarse_logits.softmax(-1)
+        p_fine_ref = ensemble_fine_with_coarse(p_fine, p_coarse, fc_tensor)
+        all_fine.extend(p_fine_ref.argmax(-1).cpu().tolist())
+        all_coarse.extend(p_coarse.argmax(-1).cpu().tolist())
+        all_fine_gt.extend(fine_labels.tolist())
+        all_coarse_gt.extend(coarse_labels.tolist())
+
+    f = {
+        'body_macro':   f1_score(all_coarse_gt, all_coarse, average='macro', zero_division=0),
+        'body_micro':   f1_score(all_coarse_gt, all_coarse, average='micro', zero_division=0),
+        'action_macro': f1_score(all_fine_gt,   all_fine,   average='macro', zero_division=0),
+        'action_micro': f1_score(all_fine_gt,   all_fine,   average='micro', zero_division=0),
+    }
+    f['f1_mean'] = sum(f.values()) / 4.0
+    return f
+
+
+def train_one_epoch_dual(model, optimizer, loader, device, epoch, scheduler,
+                          grad_accum_steps: int = 1, amp_dtype=torch.bfloat16,
+                          lambda_coarse: float = 1.0):
+    """Stage 1 joint training: CE on both heads."""
+    model.train()
+    accu_loss = 0.0
+    accu_fine_correct = 0
+    accu_coarse_correct = 0
+    n_seen = 0
+    optimizer.zero_grad()
+    loader_t = tqdm(loader, file=sys.stdout)
+    for step, (frames, fine_labels, coarse_labels) in enumerate(loader_t):
+        frames = frames.to(device)
+        fine_labels = fine_labels.to(device)
+        coarse_labels = coarse_labels.to(device)
+        with torch.autocast(device_type='cuda', dtype=amp_dtype):
+            fine_logits, coarse_logits = model(frames)
+            loss = (F.cross_entropy(fine_logits, fine_labels)
+                    + lambda_coarse * F.cross_entropy(coarse_logits, coarse_labels))
+            loss = loss / grad_accum_steps
+        loss.backward()
+        if (step + 1) % grad_accum_steps == 0:
+            optimizer.step()
+            optimizer.zero_grad()
+            scheduler.step()
+
+        accu_loss += loss.item() * grad_accum_steps
+        accu_fine_correct += (fine_logits.argmax(-1) == fine_labels).sum().item()
+        accu_coarse_correct += (coarse_logits.argmax(-1) == coarse_labels).sum().item()
+        n_seen += fine_labels.size(0)
+        loader_t.desc = (f'[s1 ep{epoch}] loss={accu_loss/(step+1):.3f} '
+                          f'fine={accu_fine_correct/n_seen:.3f} '
+                          f'coarse={accu_coarse_correct/n_seen:.3f}')
+    return {
+        'loss': accu_loss / (step + 1),
+        'fine_acc': accu_fine_correct / n_seen,
+        'coarse_acc': accu_coarse_correct / n_seen,
+    }
+
+
+def make_param_groups_stage1(model, lr_backbone=1e-5, lr_new=1e-4, lr_head=1e-3,
+                              wd=0.05):
+    """Stage 1 optimizer parameter groups.
+
+    Buckets:
+      'backbone' — InternVideo2 ViT params that existed before TC patching
+      'tc'       — new params introduced by TCMHSA (summary_ffn, etc.)
+      'adapter'  — 3D-ResNet adapter params (coarse branch)
+      'head'     — classification heads + their norms
+    """
+    backbone, tc, adapter, head, frozen = [], [], [], [], []
+    for n, p in model.named_parameters():
+        if not p.requires_grad:
+            frozen.append(n)
+            continue
+        if 'adapters' in n:
+            adapter.append(p)
+        elif 'summary_ffn' in n or n.endswith('_tc_state'):
+            tc.append(p)
+        elif n.startswith('coarse.head') or n.startswith('coarse.norm') \
+             or n.startswith('fine.head') or n.startswith('fine.norm'):
+            head.append(p)
+        elif n.startswith('fine.intv2') or n.startswith('fine.head_attn') or n.startswith('fine.head_norm'):
+            # head_attn and head_norm are part of fine_head; route to head group
+            if 'head_attn' in n or 'head_norm' in n or 'head_fc' in n:
+                head.append(p)
+            else:
+                backbone.append(p)
+        else:
+            backbone.append(p)
+    print(f'param groups: backbone={len(backbone)} tc={len(tc)} adapter={len(adapter)} head={len(head)} frozen={len(frozen)}')
+    return [
+        {'params': backbone, 'lr': lr_backbone, 'weight_decay': wd},
+        {'params': tc,       'lr': lr_new,      'weight_decay': wd},
+        {'params': adapter,  'lr': lr_new,      'weight_decay': wd},
+        {'params': head,     'lr': lr_head,     'weight_decay': 0.0},
+    ]
+
+
+def train_one_epoch_stage2(model, optimizer, loader, device, epoch, scheduler,
+                            loss_fine, loss_coarse, amp_dtype=torch.bfloat16,
+                            lambda_coarse: float = 1.0):
+    """Stage 2: heads only, custom losses (WCE+Focal), backbone+TC+adapter frozen."""
+    model.train()
+    # Backbone is frozen but BatchNorm/dropout layers should stay in eval mode.
+    # We rely on _freeze() having set .eval() previously. Heads will still update.
+
+    accu_loss = 0.0
+    n = 0
+    loader_t = tqdm(loader, file=sys.stdout)
+    optimizer.zero_grad()
+    for step, (frames, fine_labels, coarse_labels) in enumerate(loader_t):
+        frames = frames.to(device)
+        fine_labels = fine_labels.to(device)
+        coarse_labels = coarse_labels.to(device)
+        with torch.autocast(device_type='cuda', dtype=amp_dtype):
+            fine_logits, coarse_logits = model(frames)
+            loss = loss_fine(fine_logits, fine_labels) + lambda_coarse * loss_coarse(coarse_logits, coarse_labels)
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+        scheduler.step()
+
+        accu_loss += loss.item()
+        n += 1
+        loader_t.desc = f'[s2 ep{epoch}] loss={accu_loss/n:.3f}'
+    return accu_loss / n

@@ -1,112 +1,87 @@
-"""Evaluate a saved checkpoint on val and/or test set."""
-import os
+"""Test-set inference with ensembling. Produces a JSON of fine predictions."""
+
 import argparse
+import json
+import os
 
 import torch
+from torch.utils.data import DataLoader
 from torchvision import transforms
+from tqdm import tqdm
 
-from my_dataset import (MA52Dataset, load_fine2coarse_file, load_label_names_file,
-                        _DEFAULT_FINE2COARSE)
-from video_model import build_dual_video_model
-from utils import test_model
+from my_dataset import MA52Dataset, load_fine2coarse_file, _DEFAULT_FINE2COARSE
+from utils import ensemble_fine_with_coarse
+from video_model import DualBranchVideo
 
 
 def main(args):
-    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+    device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
 
-    # ── label mappings ────────────────────────────────────────────────────────
-    if args.fine2coarse_file and os.path.exists(args.fine2coarse_file):
-        fine2coarse, coarse_names = load_fine2coarse_file(args.fine2coarse_file)
+    fine2coarse_file = os.path.join(args.data_root, 'annotations/fine2coarse.txt')
+    if os.path.exists(fine2coarse_file):
+        fine2coarse, coarse_names = load_fine2coarse_file(fine2coarse_file)
     else:
-        fine2coarse  = _DEFAULT_FINE2COARSE
-        coarse_names = {0:'body', 1:'head', 2:'upper limb', 3:'lower limb',
-                        4:'body-hand', 5:'head-hand', 6:'leg-hand'}
+        fine2coarse = _DEFAULT_FINE2COARSE
+        coarse_names = {i: str(i) for i in range(7)}
+    num_coarse, num_fine = len(coarse_names), len(fine2coarse)
+    fc_tensor = torch.as_tensor(fine2coarse, dtype=torch.long, device=device)
 
-    if args.label_name_file and os.path.exists(args.label_name_file):
-        fine_names = load_label_names_file(args.label_name_file)
-    else:
-        fine_names = {i: str(i) for i in range(52)}
-
-    # ── transform (val/test) ──────────────────────────────────────────────────
-    img_size = 224
-    transform = transforms.Compose([
-        transforms.Resize(int(img_size * 1.143)),
-        transforms.CenterCrop(img_size),
+    tfm = transforms.Compose([
+        transforms.Resize(int(224 * 1.143)),
+        transforms.CenterCrop(224),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
     ])
+    ds = MA52Dataset(ann_file=args.test_ann, root=args.test_root,
+                     num_frames=args.num_frames, transform=tfm, training=False,
+                     fine2coarse=fine2coarse)
+    loader = DataLoader(ds, batch_size=args.batch_size, shuffle=False,
+                        num_workers=4, pin_memory=True,
+                        collate_fn=MA52Dataset.collate_fn)
 
-    # ── model ─────────────────────────────────────────────────────────────────
-    model = build_dual_video_model(
-        model_name_1=args.model_name_1,
-        weights_1=args.weights_1,
-        vmae_path=args.vmae_path,
-        num_fine=len(fine2coarse),
-        num_coarse=len(coarse_names),
-    ).to(device)
+    model = DualBranchVideo(vmae_path=args.vmae_path, intv2_path=args.intv2_path,
+                             num_coarse=num_coarse, num_fine=num_fine,
+                             num_frames=args.num_frames).to(device)
+    sd = torch.load(args.ckpt, map_location='cpu')
+    model.load_state_dict(sd, strict=False)
+    model.eval()
 
-    assert os.path.exists(args.checkpoint), f"Checkpoint not found: {args.checkpoint}"
-    model.load_state_dict(torch.load(args.checkpoint, map_location=device))
-    print(f"Loaded checkpoint: {args.checkpoint}")
+    predictions = []  # list of {'video': ..., 'fine_pred': ..., 'coarse_pred': ...}
+    sample_iter = iter(ds.samples)
+    with torch.no_grad():
+        for frames, _, _ in tqdm(loader):
+            frames = frames.to(device)
+            with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
+                fine_logits, coarse_logits = model(frames)
+            p_fine = fine_logits.softmax(-1)
+            p_coarse = coarse_logits.softmax(-1)
+            p_fine_ref = ensemble_fine_with_coarse(p_fine, p_coarse, fc_tensor)
+            fine_pred = p_fine_ref.argmax(-1).cpu().tolist()
+            coarse_pred = p_coarse.argmax(-1).cpu().tolist()
+            for fp, cp in zip(fine_pred, coarse_pred):
+                video_path, _, _ = next(sample_iter)
+                predictions.append({
+                    'video': os.path.basename(video_path),
+                    'fine_pred': int(fp),
+                    'coarse_pred': int(cp),
+                })
 
-    def run(ann_file, root, label, save_path):
-        if not ann_file or not os.path.exists(ann_file):
-            print(f"Skipping {label}: annotation file not found ({ann_file})")
-            return
-        ds = MA52Dataset(ann_file, root=root, num_frames=args.num_frames,
-                         transform=transform, training=False, fine2coarse=fine2coarse)
-        loader = torch.utils.data.DataLoader(
-            ds, batch_size=args.batch_size, shuffle=False,
-            num_workers=args.num_workers, pin_memory=True,
-            collate_fn=MA52Dataset.collate_fn,
-        )
-        print(f"\n[{label}]")
-        test_model(model, loader, device,
-                   fine_names=fine_names, coarse_names=coarse_names,
-                   save_path=save_path)
-
-    data_root = args.data_root
-    ann_dir   = os.path.join(data_root, 'annotations') if data_root else ''
-
-    def resolve(explicit, inferred):
-        return explicit if explicit else inferred
-
-    run(
-        ann_file  = resolve(args.val_ann,  os.path.join(ann_dir, 'val_list_videos.txt')),
-        root      = resolve(args.val_root, os.path.join(data_root, 'val') if data_root else ''),
-        label     = 'VAL',
-        save_path = './val_results.txt',
-    )
-    run(
-        ann_file  = resolve(args.test_ann,  os.path.join(ann_dir, 'test_list_videos.txt')),
-        root      = resolve(args.test_root, os.path.join(data_root, 'test') if data_root else ''),
-        label     = 'TEST',
-        save_path = './test_results.txt',
-    )
+    with open(args.output, 'w') as f:
+        json.dump(predictions, f, indent=2)
+    print(f'wrote {len(predictions)} predictions to {args.output}')
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--checkpoint',       type=str, default='./weights/best_model.pth')
-    parser.add_argument('--num-frames',       type=int, default=16)
-    parser.add_argument('--batch-size',       type=int, default=4)
-    parser.add_argument('--num-workers',      type=int, default=4)
-
-    parser.add_argument('--data-root',        type=str, default='')
-    parser.add_argument('--val-root',         type=str, default='')
-    parser.add_argument('--val-ann',          type=str, default='')
-    parser.add_argument('--test-root',        type=str, default='')
-    parser.add_argument('--test-ann',         type=str, default='')
-    parser.add_argument('--fine2coarse-file', type=str, default='')
-    parser.add_argument('--label-name-file',  type=str, default='')
-
-    parser.add_argument('--model-name-1',     type=str, default='dinov3_convnext_tiny')
-    parser.add_argument('--weights-1',        type=str,
-                        default='./dinov3_convnext_tiny_pretrain_lvd1689m-21b726bb.pth')
-    parser.add_argument('--vmae-path',        type=str, default='OpenGVLab/VideoMAEv2-Base',
-                        help='VideoMAEv2 HuggingFace model ID or local directory')
-
-    parser.add_argument('--device',           default='cuda:0')
-
-    opt = parser.parse_args()
-    main(opt)
+    p = argparse.ArgumentParser()
+    p.add_argument('--ckpt', required=True)
+    p.add_argument('--data-root', type=str, default='/mnt/d/MA52')
+    p.add_argument('--test-root', type=str, default='/mnt/d/MA52/test')
+    p.add_argument('--test-ann', type=str,
+                   default='/mnt/d/MA52/annotations/test_list_videos.txt')
+    p.add_argument('--vmae-path', type=str, default='OpenGVLab/VideoMAEv2-Large')
+    p.add_argument('--intv2-path', type=str, default='OpenGVLab/InternVideo2-Stage1-L14')
+    p.add_argument('--num-frames', type=int, default=16)
+    p.add_argument('--batch-size', type=int, default=4)
+    p.add_argument('--output', type=str, default='test_predictions.json')
+    p.add_argument('--device', type=str, default='cuda:0')
+    main(p.parse_args())
