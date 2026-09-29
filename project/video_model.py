@@ -51,10 +51,13 @@ def _restore_sinusoidal_pos_embed(model: nn.Module):
     table[:, 0::2] = np.sin(table[:, 0::2])
     table[:, 1::2] = np.cos(table[:, 1::2])
     real_pe = torch.tensor(table, dtype=torch.float32).unsqueeze(0)
+    # Some checkpoints/models already define `pos_embed` as a tensor/buffer.
+    # In that case, re-registering would raise:
+    #   KeyError: attribute 'pos_embed' already exists
     if isinstance(vit.pos_embed, nn.Parameter):
         vit.pos_embed = nn.Parameter(real_pe, requires_grad=False)
     else:
-        vit.register_buffer('pos_embed', real_pe)
+        vit.pos_embed = real_pe
 
 
 def _rematerialize_meta(module: nn.Module):

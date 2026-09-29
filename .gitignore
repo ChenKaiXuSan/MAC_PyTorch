@@ -132,3 +132,4 @@ MNIST
 /logs
 /ckpt
 /checkpoints
+/runs
